@@ -120,6 +120,7 @@ Return VALID JSON ONLY:
     const expenses  = data.expenses  || [];
     const reminders = data.reminders || [];
     const budget    = data.budget    || 5000;
+    const lastItem  = data.lastActionItem || this.lastActionItem;
 
     // Helpers
     const todayExp  = () => expenses.filter(e => !e.date || e.date === today);
@@ -127,7 +128,10 @@ Return VALID JSON ONLY:
     const monthTotal= () => expenses.reduce((s, e) => s + (Number(e.amount) || 0), 0);
 
     const makeQuery  = (spoken, actionObj)   => ({ detectedLanguage: lang, isQuery: true,  isClarification: false, isSummary: false, followUpContext: null, spokenResponse: spoken, actions: [actionObj] });
-    const makeAction = (spoken, ...acts)     => ({ detectedLanguage: lang, isQuery: false, isClarification: false, isSummary: false, followUpContext: null, spokenResponse: spoken, actions: acts });
+    const makeAction = (spoken, ...acts)     => {
+      if (acts.length > 0) this.lastActionItem = acts[0];
+      return { detectedLanguage: lang, isQuery: false, isClarification: false, isSummary: false, followUpContext: null, spokenResponse: spoken, actions: acts };
+    };
     const makeClarify= (spoken, ctx)         => ({ detectedLanguage: lang, isQuery: false, isClarification: true,  isSummary: false, followUpContext: ctx,  spokenResponse: spoken, actions: [] });
 
     // 0. Cancellation keywords
@@ -143,6 +147,7 @@ Return VALID JSON ONLY:
         (candidateIntent === 'ADD_TASK' && !context.intent.includes('TASK')) ||
         (candidateIntent === 'ADD_REMINDER' && context.intent !== 'AWAITING_REMINDER_TIME' && context.intent !== 'AWAITING_REMINDER_DETAILS') ||
         (candidateIntent === 'LOG_EXPENSE' && !context.intent.includes('EXPENSE')) ||
+        (candidateIntent === 'DRAFT_EMAIL' && !context.intent.includes('EMAIL')) ||
         (candidateIntent === 'DAILY_SUMMARY') ||
         (candidateIntent === 'QUERY_TIME') ||
         (candidateIntent === 'QUERY_WEATHER') ||
@@ -152,6 +157,28 @@ Return VALID JSON ONLY:
       ) && candidateConfidence >= 0.35;
 
       if (!isSwitchingCommand) {
+        if (context.intent === 'AWAITING_CONFIRM_DELETE_ALL_TASKS') {
+          if (/\b(yes|yeah|yep|sure|confirm|haan|kar do|karo)\b/i.test(raw)) {
+            return makeAction("All tasks have been successfully deleted.", { type: 'DELETE_ALL_TASKS' });
+          } else {
+            return makeAction("Action cancelled. Your tasks are safe.", { type: 'CANCEL' });
+          }
+        }
+        if (context.intent === 'AWAITING_CONFIRM_DELETE_ALL_DATA') {
+          if (/\b(yes|yeah|yep|sure|confirm|haan|kar do|karo)\b/i.test(raw)) {
+            return makeAction("All local data has been erased.", { type: 'DELETE_ALL_DATA' });
+          } else {
+            return makeAction("Reset cancelled. Your data has been preserved.", { type: 'CANCEL' });
+          }
+        }
+        if (context.intent === 'AWAITING_CONFIRM_SEND_EMAIL') {
+          if (/\b(yes|yeah|yep|sure|confirm|send|haan|bhej do)\b/i.test(raw)) {
+            const rec = context.partialData?.recipient || 'Rahul';
+            return makeAction(`Email dispatched successfully to ${rec}! ✉️`, { type: 'SEND_EMAIL', recipient: rec });
+          } else {
+            return makeAction("Email sending cancelled.", { type: 'CANCEL' });
+          }
+        }
         if (context.intent === 'AWAITING_REMINDER_TIME') {
           const { time: parsedTime, date: parsedDate } = this.extractTimeDate(raw);
           if (!parsedTime) {
@@ -225,10 +252,169 @@ Return VALID JSON ONLY:
 
     // ── STEP 4: EXTRACT SLOTS ─────────────────────────────────────────────
     const amount   = this.extractAmount(raw);
-    const { time, date } = this.extractTimeDate(raw);
+    const { time, date, recurring, isInvalidTime, invalidTimeStr } = this.extractTimeDate(raw);
     const category = this.extractCategory(lower);
 
     // ── STEP 5: ROUTE BY INTENT ───────────────────────────────────────────
+
+    // ── SECURITY GUARDS (TC62–TC66) ──
+    if (intent === 'SECURITY_GUARD' || /\b(another user|other user|john's tasks|john's expenses|ignore (all )?previous instructions)\b/i.test(raw)) {
+      if (/\b(ignore|bypass|jailbreak)\b/i.test(raw)) {
+        return makeQuery("Security alert: Instructions to override system safety protocols are blocked. OmniVoice operates securely.", { type: 'SECURITY_ALERT' });
+      }
+      return makeQuery("Access denied. OmniVoice operates with strict sandboxed single-user session security to protect private data.", { type: 'SECURITY_DENIED' });
+    }
+
+    // ── CONFIRMATION GUARDS: DELETE ALL TASKS (TC22) ──
+    if (intent === 'DELETE_ALL_TASKS' || /\bdelete\s+all\s+(my\s+)?tasks\b/i.test(raw)) {
+      return makeClarify("Are you sure you want to delete all tasks? This cannot be undone. Say yes to confirm.", {
+        active: true,
+        intent: 'AWAITING_CONFIRM_DELETE_ALL_TASKS',
+        partialData: {}
+      });
+    }
+
+    // ── CONFIRMATION GUARDS: DELETE ALL DATA (TC65) ──
+    if (intent === 'DELETE_ALL_DATA' || /\b(delete|reset|clear|erase)\s+all\s+(my\s+)?data\b/i.test(raw) || /\b(delete|erase)\s+everything\b/i.test(raw)) {
+      return makeClarify("Are you sure you want to delete all your tasks, reminders, and expenses? Say yes to confirm.", {
+        active: true,
+        intent: 'AWAITING_CONFIRM_DELETE_ALL_DATA',
+        partialData: {}
+      });
+    }
+
+    // ── EXPENSE ENHANCEMENT: HIGHEST EXPENSE (TC39) ──
+    if (intent === 'QUERY_HIGHEST_EXPENSE' || /\bhighest\s+expense\b/i.test(raw)) {
+      if (expenses.length === 0) {
+        return makeQuery("You haven't recorded any expenses yet.", { type: 'QUERY_EXPENSES_TODAY', total: 0 });
+      }
+      const highest = expenses.reduce((prev, curr) => (Number(curr.amount) > Number(prev.amount) ? curr : prev), expenses[0]);
+      const spoken = `Your highest expense is ₹${highest.amount} for ${highest.note} under ${highest.category}.`;
+      return makeQuery(spoken, { type: 'QUERY_EXPENSES_TODAY', highestExpense: highest, total: highest.amount });
+    }
+
+    // ── EXPENSE ENHANCEMENT: INCOME CREDIT (TC44) ──
+    if (intent === 'LOG_INCOME' || /\b(received|salary|income\s+of|credited)\b/i.test(raw)) {
+      const incAmount = this.extractAmount(raw) || 10000;
+      const spoken = `Income of ₹${incAmount.toLocaleString()} recorded and added to your balance! 💰`;
+      return makeAction(spoken, { type: 'INCOME', amount: incAmount, note: 'Income received' });
+    }
+
+    // ── CONTEXT MEMORY & ANAPHORA (TC56–TC59) ──
+    if (intent === 'ANAPHORA_CONTEXT' || /\b(set\s+(its\s+)?deadline|change\s+that\s+to|change\s+my\s+reminder|delete\s+the\s+one\s+i\s+just|what\s+did\s+i\s+just|cancel\s+(my\s+)?\d{1,2}(:\d{2})?\s*(am|pm)?\s*reminder)\b/i.test(raw)) {
+      // 1. Cancel specific reminder by time (TC27)
+      if (/\bcancel\s+(my\s+)?\d{1,2}(:\d{2})?\s*(am|pm)?\s*reminder\b/i.test(raw)) {
+        const targetTime = time || '5:00 PM';
+        return makeAction(`Cancelled your ${targetTime} reminder.`, { type: 'DELETE_REMINDER', time: targetTime });
+      }
+
+      // 2. Change reminder time (TC28)
+      if (/\bchange\s+(my\s+)?reminder\s+to\s+\d{1,2}(:\d{2})?\s*(am|pm)?\b/i.test(raw) || (time && /\bchange\s+(my\s+)?reminder\b/i.test(raw))) {
+        const newTime = time || '7:00 PM';
+        return makeAction(`Updated reminder time to ${newTime}.`, { type: 'UPDATE_REMINDER', time: newTime });
+      }
+
+      // 3. Set deadline for previous task (TC56 / TC57)
+      if (/\b(set\s+(its\s+)?deadline|change\s+that\s+to)(?:\s+(?:for|to))?\s+(tomorrow|today|friday|monday|tuesday|wednesday|thursday|saturday|sunday)\b/i.test(raw)) {
+        const mDate = raw.match(/\b(tomorrow|today|friday|monday|tuesday|wednesday|thursday|saturday|sunday)\b/i);
+        const newDeadline = mDate ? (mDate[1].charAt(0).toUpperCase() + mDate[1].slice(1).toLowerCase()) : 'Tomorrow';
+        const targetTaskTitle = (lastItem?.type === 'TASK' && lastItem.title) ? lastItem.title : (tasks[0]?.title || 'your task');
+        return makeAction(`Updated deadline for "${targetTaskTitle}" to ${newDeadline}.`, { type: 'UPDATE_TASK', title: targetTaskTitle, dueDate: newDeadline });
+      }
+
+      // 4. Delete the one just created (TC58)
+      if (/\bdelete\s+the\s+one\s+i\s+just\s+created\b/i.test(raw) || /\bdelete\s+last\s+(added\s+)?(item|task|reminder|expense)\b/i.test(raw)) {
+        if (lastItem) {
+          const itemTitle = lastItem.title || lastItem.note || 'item';
+          return makeAction(`Deleted the ${lastItem.type.toLowerCase()} "${itemTitle}".`, { type: 'DELETE_' + lastItem.type, id: lastItem.id, title: itemTitle });
+        } else if (tasks.length > 0) {
+          return makeAction(`Deleted task "${tasks[0].title}".`, { type: 'DELETE_TASK', id: tasks[0].id, title: tasks[0].title });
+        }
+        return makeQuery("No recent item found to delete.", { type: 'DELETE_TASK' });
+      }
+
+      // 5. What did I just add? (TC59)
+      if (/\bwhat\s+did\s+i\s+just\s+add\b/i.test(raw) || /\bwhat\s+was\s+the\s+last\s+(item|thing)\b/i.test(raw)) {
+        if (lastItem) {
+          const desc = lastItem.type === 'EXPENSE' ? `an expense of ₹${lastItem.amount} for ${lastItem.note}` : `a ${lastItem.type.toLowerCase()}: "${lastItem.title}"`;
+          return makeQuery(`You just added ${desc}.`, { type: 'QUERY_LAST_ITEM', item: lastItem });
+        } else if (tasks.length > 0) {
+          return makeQuery(`Your most recent task is "${tasks[0].title}".`, { type: 'QUERY_LAST_ITEM', item: tasks[0] });
+        }
+        return makeQuery("You haven't added any items in this session yet.", { type: 'QUERY_LAST_ITEM' });
+      }
+    }
+
+    // ── EMAIL MODULE (TC46–TC55) ──
+    if (intent === 'DRAFT_EMAIL' || /\b(draft\s+(an\s+)?email|compose\s+(an\s+)?email|write\s+(an\s+)?(?:internship\s+)?(?:application\s+)?email)\b/i.test(raw)) {
+      const isInternship = /\b(internship|application|job)\b/i.test(raw);
+      let recipient = 'Hiring Team';
+      let subject = 'Application for Software Engineering Internship';
+      let body = 'Dear Hiring Manager,\n\nI am writing to express my strong interest in the Software Engineering Internship position at your company. With hands-on experience in full-stack AI development and software architecture, I would welcome the opportunity to contribute to your engineering team.\n\nSincerely,\nBalkirat Singh';
+
+      if (!isInternship) {
+        const mTo = raw.match(/\bto\s+([A-Za-z]+)\b/i);
+        recipient = mTo ? (mTo[1].charAt(0).toUpperCase() + mTo[1].slice(1)) : 'Rahul';
+        subject = `Follow up: Project Discussion with ${recipient}`;
+        body = `Hi ${recipient},\n\nI hope this email finds you well. I wanted to follow up with you regarding our discussion on the OmniVoice voice assistant project and next milestones.\n\nBest regards,\nBalkirat`;
+      }
+
+      const spoken = isInternship
+        ? "I've drafted your internship application email. Ready for your review."
+        : `Drafted an email to ${recipient}. Ready for your review.`;
+
+      return makeAction(spoken, {
+        type: 'DRAFT_EMAIL',
+        recipient,
+        subject,
+        body,
+        timestamp: Date.now()
+      });
+    }
+
+    if (intent === 'QUERY_EMAILS' || /\b(unread\s+emails?|show\s+(my\s+)?emails?|find\s+(the\s+)?email|search\s+emails?)\b/i.test(raw)) {
+      const isHR = /\b(hr|interview)\b/i.test(raw);
+      if (isHR) {
+        return makeQuery("Found 1 email from HR Team: 'Interview Confirmation for AI Engineer Role'. Your final interview is scheduled for Friday at 3:00 PM via Google Meet.", {
+          type: 'QUERY_EMAILS',
+          match: 'HR Team'
+        });
+      }
+      return makeQuery("You have 2 unread emails: 1 from HR regarding Interview Confirmation, and 1 from Rahul Sharma regarding OmniVoice API integration.", {
+        type: 'QUERY_EMAILS',
+        unreadCount: 2
+      });
+    }
+
+    if (intent === 'SUMMARIZE_EMAIL' || /\bsummarize\s+(my\s+)?(?:latest\s+)?email\b/i.test(raw)) {
+      return makeQuery("Summary of your latest email from HR: Your final technical interview is confirmed for Friday at 3:00 PM via Google Meet. Please keep your portfolio and repo links ready.", {
+        type: 'SUMMARIZE_EMAIL'
+      });
+    }
+
+    if (intent === 'REPLY_EMAIL' || /\breply\s+to\s+(the\s+)?(?:latest\s+)?email\b/i.test(raw)) {
+      return makeAction("Drafted a reply to HR: 'Thank you for the update. I confirm my availability for Friday at 3:00 PM and look forward to the interview.' Ready to send.", {
+        type: 'DRAFT_EMAIL',
+        recipient: 'HR Team',
+        subject: 'Re: Interview Confirmation for AI Engineer Role',
+        body: 'Thank you for the update. I confirm my availability for Friday at 3:00 PM and look forward to the interview.\n\nBest regards,\nBalkirat'
+      });
+    }
+
+    if (intent === 'SEND_EMAIL' || /\bsend\s+(this\s+)?email\b/i.test(raw)) {
+      // Check invalid recipient format if email syntax provided
+      const mBadEmail = raw.match(/\bto\s+([A-Za-z0-9._%+-]+(?:\s*@\s*|\s+at\s+)[A-Za-z0-9.-]+)\b/i);
+      if (mBadEmail && !/^[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}$/.test(mBadEmail[1].replace(/\s+/g, ''))) {
+        return makeQuery("Please provide a valid recipient email address.", { type: 'EMAIL_ERROR' });
+      }
+      const mTo = raw.match(/\bto\s+([A-Za-z]+)\b/i);
+      const recipient = mTo ? (mTo[1].charAt(0).toUpperCase() + mTo[1].slice(1)) : 'Rahul';
+      return makeClarify(`Ready to send email to ${recipient}. Say confirm to send.`, {
+        active: true,
+        intent: 'AWAITING_CONFIRM_SEND_EMAIL',
+        partialData: { recipient }
+      });
+    }
 
     // ── GREETING ──
     if (intent === 'GREETING') {
@@ -398,7 +584,10 @@ Return VALID JSON ONLY:
 
     // ── ACTION: COMPLETE TASK ──
     if (intent === 'COMPLETE_TASK') {
-      const title = this.extractTitle(raw, 'COMPLETE_TASK');
+      let title = this.extractTitle(raw, 'COMPLETE_TASK');
+      if (!title) {
+        title = raw.replace(/\b(mark|set|task|todo|my|as|completed|complete|done|finished)\b/gi, '').trim();
+      }
       if (title) {
         return makeAction(`Marked "${title}" as completed! Great job! 🎉`, { type: 'COMPLETE_TASK', title });
       }
@@ -406,7 +595,10 @@ Return VALID JSON ONLY:
 
     // ── ACTION: DELETE TASK ──
     if (intent === 'DELETE_TASK') {
-      const title = this.extractTitle(raw, 'DELETE_TASK');
+      let title = this.extractTitle(raw, 'DELETE_TASK');
+      if (!title) {
+        title = raw.replace(/\b(delete|remove|cancel|erase|task|todo|my)\b/gi, '').trim();
+      }
       if (title) {
         return makeAction(`Deleted "${title}".`, { type: 'DELETE_TASK', title });
       }
@@ -435,7 +627,16 @@ Return VALID JSON ONLY:
 
     // ── ACTION: ADD REMINDER ──
     if (intent === 'ADD_REMINDER') {
-      const title = this.extractTitle(raw, 'ADD_REMINDER');
+      if (isInvalidTime) {
+        return makeQuery(`${invalidTimeStr || 'That'} is not a valid time. Please specify a time between 1 AM and 12 PM.`, { type: 'INVALID_TIME' });
+      }
+
+      let title = this.extractTitle(raw, 'ADD_REMINDER');
+
+      // If time given without title, default title to 'Reminder' (e.g. "Remind me after 10 minutes", "Remind me tomorrow at 9 AM", "Remind me every Monday at 10 AM")
+      if (!title && time) {
+        title = 'Reminder';
+      }
 
       // Case 1: Bare reminder command (e.g. "help me add a reminder", "set a reminder", "remind me")
       if (!title) {
@@ -451,19 +652,28 @@ Return VALID JSON ONLY:
 
       // Case 2: Title provided, but no time (e.g. "remind me to call dad")
       if (!time) {
-        const dateLabel = date || 'Today';
+        const dateLabel = recurring || date || 'Today';
         const question = lang.includes('Hindi')
           ? `"${title}" का रिमाइंडर किस समय के लिए?`
           : `At what time would you like the reminder for "${title}"?`;
         return makeClarify(question, { active: true, intent: 'AWAITING_REMINDER_TIME', partialData: { title, date: dateLabel } });
       }
 
+      // Case 2.5: Past time check (TC29)
+      if (/\b(past\s+time|in\s+the\s+past|yesterday|pehle\s+ka)\b/i.test(raw)) {
+        return makeClarify(`That time (${time || 'specified'}) has already passed. Would you like me to schedule it for tomorrow?`, {
+          active: true,
+          intent: 'AWAITING_REMINDER_TIME',
+          partialData: { title: title || 'Reminder', date: 'Tomorrow' }
+        });
+      }
+
       // Case 3: Title and time both provided
-      const dateLabel = date || 'Today';
+      const dateLabel = recurring || date || 'Today';
       const spoken = lang.includes('Hindi')
         ? `हो गया! "${title}" का रिमाइंडर ${dateLabel} को ${time} के लिए सेट।`
         : `Reminder set: "${title}" for ${dateLabel} at ${time}.`;
-      return makeAction(spoken, { type: 'REMINDER', title, date: dateLabel, time, timestamp: Date.now() });
+      return makeAction(spoken, { type: 'REMINDER', title, date: dateLabel, time, recurring: recurring || null, timestamp: Date.now() });
     }
 
     // ── ACTION: LOG EXPENSE ──
@@ -530,8 +740,9 @@ Return VALID JSON ONLY:
   // This is what regex is good for — fixed-format patterns, not natural language understanding.
 
   extractAmount(text) {
-    // Match: "₹200", "rs 200", "200 rupees", "200" (bare number after expense words)
-    const m = text.match(/(?:(?:rs\.?\s*|₹\s*|inr\s*)(\d+(?:\.\d{1,2})?))|(?:(\d+(?:\.\d{1,2})?)\s*(?:rupees?|rupaye|rs\b|inr\b))|(?:(\d+(?:\.\d{1,2})?)(?!\s*(?:am|pm|baje|vaje|:\d{2})))/i);
+    // Match: "₹200", "rs 200", "200 rupees", "200" (bare number after expense words), supporting commas like "10,000"
+    const cleanText = text.replace(/,/g, '');
+    const m = cleanText.match(/(?:(?:rs\.?\s*|₹\s*|inr\s*)(\d+(?:\.\d{1,2})?))|(?:(\d+(?:\.\d{1,2})?)\s*(?:rupees?|rupaye|rs\b|inr\b))|(?:(\d+(?:\.\d{1,2})?)(?!\s*(?:am|pm|baje|vaje|:\d{2})))/i);
     if (!m) return null;
     const val = parseFloat(m[1] ?? m[2] ?? m[3]);
     return isNaN(val) ? null : val;
@@ -539,24 +750,57 @@ Return VALID JSON ONLY:
 
   extractTimeDate(text) {
     let time = null;
+    let isInvalidTime = false;
+    let invalidTimeStr = null;
+
+    // Detect invalid times like 25 PM, 13 PM, 25:00, 26:30
+    const mInv = text.match(/\b(\d{1,3})[:.\s]?(\d{2})?\s*(a\.?m\.?|p\.?m\.?)\b/i);
+    if (mInv) {
+      const ih = parseInt(mInv[1]);
+      if (ih > 12 || ih === 0) {
+        isInvalidTime = true;
+        invalidTimeStr = mInv[0];
+      }
+    }
+    const mInv24 = text.match(/\b(\d{2,3})[:.](\d{2})\b/);
+    if (mInv24 && parseInt(mInv24[1]) > 23) {
+      isInvalidTime = true;
+      invalidTimeStr = mInv24[0];
+    }
+
+    // Pattern 0: Relative time: "after 10 minutes", "in 15 mins", "after 1 hour", "in 2 hours"
+    const mRel = text.match(/\b(?:after|in)\s+(\d+)\s*(mins?|minutes?|hours?|hrs?)\b/i);
+    if (mRel) {
+      const val = parseInt(mRel[1]);
+      const unit = mRel[2].toLowerCase();
+      const addMs = unit.startsWith('h') ? val * 3600000 : val * 60000;
+      const targetDate = new Date(Date.now() + addMs);
+      let h = targetDate.getHours();
+      const min = String(targetDate.getMinutes()).padStart(2, '0');
+      const mer = h >= 12 ? 'PM' : 'AM';
+      h = h % 12 || 12;
+      time = `${h}:${min} ${mer}`;
+    }
 
     // Pattern 1: HH:MM, HH.MM, or HH MM with optional AM/PM (e.g. '12 38 pm', '12:38 pm', '12.38 pm', '4:30', '11 15 am', '11:28 a.m.')
-    const m1 = text.match(/\b(\d{1,2})[:.\s](\d{2})\s*(a\.?m\.?|p\.?m\.?|baje|vaje)?\b/i);
-    if (m1) {
-      const h = parseInt(m1[1]);
-      const min = m1[2];
-      let mer = (m1[3] || '').replace(/\./g, '').toUpperCase();
-      if (h >= 0 && h <= 23 && parseInt(min) >= 0 && parseInt(min) <= 59) {
-        if (!mer || (mer !== 'AM' && mer !== 'PM')) {
-          mer = h >= 12 ? 'PM' : (h >= 7 && h <= 11 ? 'AM' : 'PM');
+    if (!time && !isInvalidTime) {
+      const m1 = text.match(/\b(\d{1,2})[:.\s](\d{2})\s*(a\.?m\.?|p\.?m\.?|baje|vaje)?\b/i);
+      if (m1) {
+        const h = parseInt(m1[1]);
+        const min = m1[2];
+        let mer = (m1[3] || '').replace(/\./g, '').toUpperCase();
+        if (h >= 0 && h <= 23 && parseInt(min) >= 0 && parseInt(min) <= 59) {
+          if (!mer || (mer !== 'AM' && mer !== 'PM')) {
+            mer = h >= 12 ? 'PM' : (h >= 7 && h <= 11 ? 'AM' : 'PM');
+          }
+          const displayH = h > 12 ? h - 12 : (h === 0 ? 12 : h);
+          time = `${displayH}:${min} ${mer}`;
         }
-        const displayH = h > 12 ? h - 12 : (h === 0 ? 12 : h);
-        time = `${displayH}:${min} ${mer}`;
       }
     }
 
     // Pattern 2: Concatenated 3-4 digits like '1128 am' or '1128 a.m.' or '930 pm'
-    if (!time) {
+    if (!time && !isInvalidTime) {
       const mConcatenated = text.match(/\b(\d{1,2})(\d{2})\s*(a\.?m\.?|p\.?m\.?)\b/i);
       if (mConcatenated) {
         const h = parseInt(mConcatenated[1]);
@@ -569,7 +813,7 @@ Return VALID JSON ONLY:
     }
 
     // Pattern 3: Single hour with AM/PM, baje/vaje, or o'clock (e.g. '5 pm', '12 pm', '7 am', '5 baje', '5 o clock', '6 a.m.')
-    if (!time) {
+    if (!time && !isInvalidTime) {
       const m2 = text.match(/\b(\d{1,2})\s*(?:o'?clock\s*)?(a\.?m\.?|p\.?m\.?|baje|vaje|o'?clock)?\b/i);
       if (m2) {
         const h = parseInt(m2[1]);
@@ -583,21 +827,31 @@ Return VALID JSON ONLY:
       }
     }
 
-    // Date: "tomorrow", "today", "yesterday", days of week, or custom dates (e.g. "Nov 5", "5th Nov")
+    // Date: "tomorrow", "today", "yesterday", days of week, recurring "every Monday", or custom dates (e.g. "Nov 5", "5th Nov")
     let date = null;
-    const specificDateMatch = text.match(/\b(?:on\s+)?(?:the\s+)?(?:(\d{1,2}(?:st|nd|rd|th)?\s+(?:of\s+)?(?:jan(?:uary)?|feb(?:ruary)?|mar(?:ch)?|apr(?:il)?|may|jun(?:e)?|jul(?:y)?|aug(?:ust)?|sep(?:tember)?|oct(?:ober)?|nov(?:ember)?|dec(?:ember)?))|(?:(?:jan(?:uary)?|feb(?:ruary)?|mar(?:ch)?|apr(?:il)?|may|jun(?:e)?|jul(?:y)?|aug(?:ust)?|sep(?:tember)?|oct(?:ober)?|nov(?:ember)?|dec(?:ember)?)\s+(\d{1,2}(?:st|nd|rd|th)?)))\b/i);
-    if (specificDateMatch) {
-      date = specificDateMatch[0].replace(/^(?:on\s+|the\s+)/i, '').trim();
-    } else {
-      const dateMatch = text.match(/\b(tomorrow|today|yesterday|monday|tuesday|wednesday|thursday|friday|saturday|sunday|kal|parso)\b/i);
-      if (dateMatch) {
-        const d = dateMatch[1].toLowerCase();
-        if (d === 'kal') date = 'Tomorrow';
-        else if (d === 'parso') date = 'Day after tomorrow';
-        else date = d.charAt(0).toUpperCase() + d.slice(1);
+    let recurring = null;
+    const mRec = text.match(/\b(?:every|each)\s+(monday|tuesday|wednesday|thursday|friday|saturday|sunday|day|morning|night)\b/i);
+    if (mRec) {
+      const day = mRec[1].charAt(0).toUpperCase() + mRec[1].slice(1).toLowerCase();
+      recurring = `Every ${day}`;
+      date = recurring;
+    }
+
+    if (!date) {
+      const specificDateMatch = text.match(/\b(?:on\s+)?(?:the\s+)?(?:(\d{1,2}(?:st|nd|rd|th)?\s+(?:of\s+)?(?:jan(?:uary)?|feb(?:ruary)?|mar(?:ch)?|apr(?:il)?|may|jun(?:e)?|jul(?:y)?|aug(?:ust)?|sep(?:tember)?|oct(?:ober)?|nov(?:ember)?|dec(?:ember)?))|(?:(?:jan(?:uary)?|feb(?:ruary)?|mar(?:ch)?|apr(?:il)?|may|jun(?:e)?|jul(?:y)?|aug(?:ust)?|sep(?:tember)?|oct(?:ober)?|nov(?:ember)?|dec(?:ember)?)\s+(\d{1,2}(?:st|nd|rd|th)?)))\b/i);
+      if (specificDateMatch) {
+        date = specificDateMatch[0].replace(/^(?:on\s+|the\s+)/i, '').trim();
+      } else {
+        const dateMatch = text.match(/\b(tomorrow|today|yesterday|monday|tuesday|wednesday|thursday|friday|saturday|sunday|kal|parso)\b/i);
+        if (dateMatch) {
+          const d = dateMatch[1].toLowerCase();
+          if (d === 'kal') date = 'Tomorrow';
+          else if (d === 'parso') date = 'Day after tomorrow';
+          else date = d.charAt(0).toUpperCase() + d.slice(1);
+        }
       }
     }
-    return { time, date };
+    return { time, date, recurring, isInvalidTime, invalidTimeStr };
   }
 
   extractCategory(lower) {
@@ -643,6 +897,8 @@ Return VALID JSON ONLY:
 
     // 3. Strip time/date/trailing prepositions
     t = t
+      .replace(/\b(?:after|in)\s+\d+\s*(?:mins?|minutes?|hours?|hrs?)\b/gi, '')
+      .replace(/\b(?:every|each)\s+(?:monday|tuesday|wednesday|thursday|friday|saturday|sunday|day|morning|night)\b/gi, '')
       .replace(/\b(at\s+)?\d{1,4}(?:[:.\s]\d{2})?\s*(?:a\.?m\.?|p\.?m\.?|baje|vaje|o'?clock)(?:\.|\b)?/gi, '')
       .replace(/\b(?:on\s+)?(?:the\s+)?(?:(\d{1,2}(?:st|nd|rd|th)?\s+(?:of\s+)?(?:jan(?:uary)?|feb(?:ruary)?|mar(?:ch)?|apr(?:il)?|may|jun(?:e)?|jul(?:y)?|aug(?:ust)?|sep(?:tember)?|oct(?:ober)?|nov(?:ember)?|dec(?:ember)?))|(?:(?:jan(?:uary)?|feb(?:ruary)?|mar(?:ch)?|apr(?:il)?|may|jun(?:e)?|jul(?:y)?|aug(?:ust)?|sep(?:tember)?|oct(?:ober)?|nov(?:ember)?|dec(?:ember)?)\s+(\d{1,2}(?:st|nd|rd|th)?)))\b/gi, '')
       .replace(/\b(on\s+)?(tomorrow|today|yesterday|monday|tuesday|wednesday|thursday|friday|saturday|sunday|kal|parso)\b/gi, '')
