@@ -14,6 +14,7 @@
 | Key Information | Details |
 | :--- | :--- |
 | **Project Title** | **OmniVoice AI** |
+| **Author / Submitter** | **Sehajpreet Kaur** |
 | **Live Production Link** | **[https://sehajsomal5.github.io/omnivoice/](https://sehajsomal5.github.io/omnivoice/)** |
 | **Source Code Repository** | **[https://github.com/sehajsomal5/omnivoice](https://github.com/sehajsomal5/omnivoice)** |
 | **Supported Languages** | **English, Hindi, Punjabi, Hinglish (Mid-sentence code switching)** |

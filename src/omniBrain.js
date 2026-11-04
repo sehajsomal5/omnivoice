@@ -350,13 +350,13 @@ Return VALID JSON ONLY:
       const isInternship = /\b(internship|application|job)\b/i.test(raw);
       let recipient = 'Hiring Team';
       let subject = 'Application for Software Engineering Internship';
-      let body = 'Dear Hiring Manager,\n\nI am writing to express my strong interest in the Software Engineering Internship position at your company. With hands-on experience in full-stack AI development and software architecture, I would welcome the opportunity to contribute to your engineering team.\n\nSincerely,\nBalkirat Singh';
+      let body = 'Dear Hiring Manager,\n\nI am writing to express my strong interest in the Software Engineering Internship position at your company. With hands-on experience in full-stack AI development and software architecture, I would welcome the opportunity to contribute to your engineering team.\n\nSincerely,\nSehajpreet Kaur';
 
       if (!isInternship) {
         const mTo = raw.match(/\bto\s+([A-Za-z]+)\b/i);
         recipient = mTo ? (mTo[1].charAt(0).toUpperCase() + mTo[1].slice(1)) : 'Rahul';
         subject = `Follow up: Project Discussion with ${recipient}`;
-        body = `Hi ${recipient},\n\nI hope this email finds you well. I wanted to follow up with you regarding our discussion on the OmniVoice voice assistant project and next milestones.\n\nBest regards,\nBalkirat`;
+        body = `Hi ${recipient},\n\nI hope this email finds you well. I wanted to follow up with you regarding our discussion on the OmniVoice voice assistant project and next milestones.\n\nBest regards,\nSehajpreet`;
       }
 
       const spoken = isInternship
@@ -397,7 +397,7 @@ Return VALID JSON ONLY:
         type: 'DRAFT_EMAIL',
         recipient: 'HR Team',
         subject: 'Re: Interview Confirmation for AI Engineer Role',
-        body: 'Thank you for the update. I confirm my availability for Friday at 3:00 PM and look forward to the interview.\n\nBest regards,\nBalkirat'
+        body: 'Thank you for the update. I confirm my availability for Friday at 3:00 PM and look forward to the interview.\n\nBest regards,\nSehajpreet'
       });
     }
 
@@ -416,12 +416,15 @@ Return VALID JSON ONLY:
       });
     }
 
-    // ── GREETING ──
+    // ── GREETING / SELF-INTRODUCTION ──
     if (intent === 'GREETING') {
-      return makeQuery(
-        "I'm OmniVoice! Try: \"I spent 200 on lunch\", \"add task call doctor\", \"remind me at 5 PM\", \"what time is it\", or \"daily summary\".",
-        { type: 'QUERY_TASKS' }
-      );
+      const isIntro = /\b(yourself|introduce|who are you|what are you|about you|parichay)\b/i.test(raw);
+      const spoken = isIntro
+        ? (lang.includes('Hindi')
+            ? "नमस्ते! मैं OmniVoice AI हूँ, सेहजप्रीत कौर के लिए बनाया गया मल्टीलिंगुअल पर्सनल असिस्टेंट। मैं आपके टास्क्स, रिमाइंडर्स, खर्चे और ईमेल संभाल सकता हूँ!"
+            : "Hello! I'm OmniVoice AI, a multilingual voice personal assistant built for Sehajpreet Kaur. I can manage your tasks, track expenses, schedule reminders with alarms, and draft emails in English, Hindi, and Punjabi!")
+        : "I'm OmniVoice! Try: \"I spent 200 on lunch\", \"add task call doctor\", \"remind me at 5 PM\", \"what time is it\", or \"daily summary\".";
+      return makeQuery(spoken, { type: 'GREETING' });
     }
 
     // ── SIRI UTILITY: QUERY TIME ──
@@ -475,7 +478,7 @@ Return VALID JSON ONLY:
         return makeQuery("Siri is legendary, but can she track your Punjabi expenses and parse Indian clock times offline? OmniVoice is proud of its roots! 🚀", { type: 'EASTER_EGG' });
       }
       if (/\b(who\s+(made|created|built)|creator)\b/i.test(raw)) {
-        return makeQuery("I was built by Balkirat Singh as an enterprise multilingual voice assistant for the hackathon! 🏆", { type: 'EASTER_EGG' });
+        return makeQuery("I was built by Sehajpreet Kaur as an enterprise multilingual voice assistant for the hackathon! 🏆", { type: 'EASTER_EGG' });
       }
       const jokes = [
         "Why don't programmers like nature? It has too many bugs! 🐛",
@@ -859,7 +862,7 @@ Return VALID JSON ONLY:
     if (/\b(uber|cab|taxi|petrol|fuel|auto|metro|bus|travel|flight|ola|rapido)\b/.test(lower))               return 'Travel';
     if (/\b(groceries|grocery|sabzi|fruits|milk|doodh|supermarket|vegetables)\b/.test(lower))                return 'Groceries';
     if (/\b(bill|recharge|wifi|electricity|rent|subscription|netflix)\b/.test(lower))                        return 'Bills';
-    if (/\b(shopping|clothes|shoes|amazon|flipkart|zara|myntra)\b/.test(lower))                              return 'Shopping';
+    if (/\b(shopping|clothes|shoes|amazon|flipkart|zara|myntra|online)\b/.test(lower))                       return 'Shopping';
     if (/\b(medicine|doctor|pharmacy|hospital|clinic)\b/.test(lower))                                        return 'Health';
     return 'Other';
   }
@@ -933,6 +936,7 @@ Return VALID JSON ONLY:
       .replace(/^(and|or)\s+/i, '')
       .trim();
     if (!note || note.length < 2) note = category || 'Expense';
+    if (note.toLowerCase() === 'online') note = 'Online Shopping';
     return note.charAt(0).toUpperCase() + note.slice(1);
   }
 

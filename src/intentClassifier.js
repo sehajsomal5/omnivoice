@@ -390,6 +390,9 @@ const TRAINING_DATA = {
     'hello', 'hi', 'hey', 'good morning', 'good evening', 'good afternoon',
     'who are you', 'what can you do', 'help', 'test', 'testing',
     'are you there', 'namaste', 'sat sri akal', 'whats up', 'yo',
+    'tell me about yourself', 'about yourself', 'introduce yourself',
+    'who made you', 'what is omnivoice', 'tell me about you', 'introduce',
+    'apne baare mein batao', 'apna parichay do', 'dasso apne baare',
   ],
 };
 
@@ -426,7 +429,7 @@ const INTENT_ANCHORS = {
   DELETE_ALL_DATA:      ['delete all my data','delete all data','reset all data','clear everything','erase all'],
   ANAPHORA_CONTEXT:     ['its deadline','that to','one i just','what did i just','change my reminder'],
   SECURITY_GUARD:       ['another user','other user','john','unauthorized','ignore previous instructions'],
-  GREETING:             ['hello','hi','hey','help'],
+  GREETING:             ['hello','hi','hey','help','yourself','introduce','parichay'],
 };
 
 export class IntentClassifier {
@@ -566,6 +569,19 @@ export class IntentClassifier {
     // 0h. Security Guards
     if (/\b(another\s+user|other\s+user|john's\s+tasks|john's\s+expenses|ignore\s+previous\s+instructions|without\s+authorization)\b/i.test(lower)) {
       scores['SECURITY_GUARD'] = Math.max(scores['SECURITY_GUARD'], 0.90);
+    }
+
+    // 0i. Identity / Introduction query ("tell me about yourself", "who are you")
+    if (/\b(yourself|introduce|who are you|about you|parichay)\b/i.test(lower)) {
+      scores['GREETING'] = Math.max(scores['GREETING'], 0.95);
+      scores['QUERY_TASKS'] *= 0.05;
+      scores['QUERY_EXPENSES_TODAY'] *= 0.05;
+      scores['DAILY_SUMMARY'] *= 0.05;
+    }
+
+    // Suppress QUERY_TASKS if no task words appear
+    if (!/\b(task|tasks|kaam|kamm|todo|agenda|schedule|backlog)\b/i.test(lower)) {
+      scores['QUERY_TASKS'] *= 0.15;
     }
 
     // 0c. Explicit reminder command words ("remind me", "set reminder", "alarm") -> boost ADD_REMINDER over ADD_TASK
