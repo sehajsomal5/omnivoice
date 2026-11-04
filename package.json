@@ -1,0 +1,20 @@
+{
+  "name": "omnivoice",
+  "version": "1.0.0",
+  "description": "OmniVoice - Multilingual Voice AI Assistant (Speak. Understand. Act.)",
+  "main": "server.js",
+  "type": "module",
+  "scripts": {
+    "start": "node server.js",
+    "dev": "node server.js"
+  },
+  "keywords": [
+    "voice-ai",
+    "hackathon",
+    "personal-assistant",
+    "multilingual",
+    "speech-recognition"
+  ],
+  "author": "Hackathon Winner",
+  "license": "MIT"
+}
