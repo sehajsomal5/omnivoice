@@ -487,15 +487,15 @@ Return VALID JSON ONLY:
     let t = text;
 
     // 1. Strip polite/conversational prefixes
-    t = t.replace(/\b(hey\s+(?:omni|voice|ai)|please|help\s+me(\s+to)?|can\s+you(\s+please)?|could\s+you(\s+please)?|i\s+want\s+to|i\s+need\s+to|mujhe)\b/gi, '');
+    t = t.replace(/\b(hey\s+(?:omni|voice|ai)|please|help\s+me(\s+to)?|can\s+you(\s+please)?|could\s+you(\s+please)?|i\s+want\s+to|i\s+need\s+to|i'd\s+like\s+to|would\s+like\s+to|mujhe)\b/gi, '');
 
     // 2. Strip intent-specific command wrappers
     if (intent === 'ADD_TASK') {
       t = t.replace(/\b(add|create|make|put|enter|log)\s+(a\s+)?(new\s+)?task\s*(to\s+|for\s+)?\b/gi, '');
       t = t.replace(/\b(add|create)\s+(a\s+)?(new\s+)?todo\s*/gi, '');
-      t = t.replace(/\bnew\s+task\b/gi, '');
+      t = t.replace(/\b(new\s+task|task)\b/gi, '');
     } else if (intent === 'ADD_REMINDER') {
-      t = t.replace(/\b(remind\s+me(\s+(to|that))?|set\s+(a\s+)?reminder(\s+(for|to|that))?|add\s+(a\s+)?reminder(\s+(for|to|that))?|create\s+(a\s+)?reminder(\s+(for|to|that))?|new\s+reminder(\s+(for|to))?|schedule\s+(a\s+)?reminder(\s+(for|to))?|reminder\s*:|reminder)\b/gi, '');
+      t = t.replace(/\b(remind\s+me(\s+(to|that))?|(?:add|set|create|schedule|make|put)\s+(?:a\s+)?(?:new\s+)?reminder(?:\s+(?:for|to|that))?|new\s+reminder(?:\s+(?:for|to))?|reminder\s*:|reminder)\b/gi, '');
     } else if (intent === 'COMPLETE_TASK') {
       t = t.replace(/\b(mark|set)\s+(task\s+|todo\s+)?(.+?)\s+(as\s+)?(done|complete|completed|finished)\b/gi, (_, _m, _pre, capture) => capture || '');
       t = t.replace(/\b(complete|finish)\s+(task\s+|todo\s+)?\b/gi, '');
@@ -514,8 +514,14 @@ Return VALID JSON ONLY:
       .replace(/^(to|that|for|and|a|an)\s+/i, '')
       .trim();
 
-    // 4. Refuse trivial/meaningless filler phrases
-    const fillerWords = new Set(['this', 'that', 'something', 'a reminder', 'reminder', 'a task', 'task', 'it', 'me', 'one']);
+    // 4. Strip any dangling action keywords leftover (e.g. "add a", "create a new", "set a")
+    t = t.replace(/^(add|create|set|make|put|schedule|remind)\s+(a\s+)?(new\s+)?(reminder|task)?\s*/i, '').trim();
+
+    // 5. Refuse trivial/meaningless filler phrases
+    const fillerWords = new Set([
+      'this', 'that', 'something', 'a reminder', 'reminder', 'a task', 'task', 'it', 'me', 'one',
+      'add a', 'add', 'create', 'set', 'new', 'add a new', 'create a new', 'set a new', 'a new', 'new reminder', 'new task'
+    ]);
     if (!t || t.length < 2 || fillerWords.has(t.toLowerCase())) return null;
 
     return t.charAt(0).toUpperCase() + t.slice(1);
