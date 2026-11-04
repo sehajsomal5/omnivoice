@@ -199,9 +199,71 @@ Return VALID JSON ONLY:
     // ── GREETING ──
     if (intent === 'GREETING') {
       return makeQuery(
-        "I'm OmniVoice! Try: \"I spent 200 on lunch\", \"add task call doctor\", \"remind me at 5 PM\", \"show my tasks\", or \"daily summary\".",
+        "I'm OmniVoice! Try: \"I spent 200 on lunch\", \"add task call doctor\", \"remind me at 5 PM\", \"what time is it\", or \"daily summary\".",
         { type: 'QUERY_TASKS' }
       );
+    }
+
+    // ── SIRI UTILITY: QUERY TIME ──
+    if (intent === 'QUERY_TIME') {
+      const now = new Date();
+      let hours = now.getHours();
+      const minutes = String(now.getMinutes()).padStart(2, '0');
+      const mer = hours >= 12 ? 'PM' : 'AM';
+      hours = hours % 12 || 12;
+      const timeStr = `${hours}:${minutes} ${mer}`;
+      const spoken = lang.includes('Hindi') ? `अभी समय ${timeStr} है।` : `It's currently ${timeStr}.`;
+      return makeQuery(spoken, { type: 'QUERY_TIME', time: timeStr });
+    }
+
+    // ── SIRI UTILITY: QUERY DATE ──
+    if (intent === 'QUERY_DATE') {
+      const now = new Date();
+      const dateStr = now.toLocaleDateString('en-US', { weekday: 'long', month: 'long', day: 'numeric', year: 'numeric' });
+      const spoken = lang.includes('Hindi') ? `आज ${dateStr} है।` : `Today is ${dateStr}.`;
+      return makeQuery(spoken, { type: 'QUERY_DATE', date: dateStr });
+    }
+
+    // ── SIRI UTILITY: CALCULATOR / MATH ──
+    if (intent === 'CALCULATOR') {
+      const math = this.evaluateMath(raw);
+      if (math) {
+        return makeQuery(math.spoken, { type: 'CALCULATOR', expression: math.expr, result: math.ans });
+      }
+      return makeQuery("I can calculate addition, subtraction, multiplication, division, and percentages! Try: 'What is 15 percent of 2000?'", { type: 'CALCULATOR' });
+    }
+
+    // ── SIRI UTILITY: WEATHER ──
+    if (intent === 'QUERY_WEATHER') {
+      const spoken = lang.includes('Hindi')
+        ? `आज आपके इलाके में मौसम सुहावना और साफ है, तापमान लगभग 24 डिग्री सेल्सियस है।`
+        : `It's currently 24°C with pleasant, partly cloudy skies. Great day to demo AI! ☀️`;
+      return makeQuery(spoken, { type: 'QUERY_WEATHER', temperature: '24°C', condition: 'Partly Cloudy' });
+    }
+
+    // ── SIRI UTILITY: EASTER EGGS, COIN FLIP, DICE ──
+    if (intent === 'EASTER_EGG') {
+      if (/\b(coin|toss|heads|tails)\b/i.test(raw)) {
+        const side = Math.random() < 0.5 ? 'Heads' : 'Tails';
+        return makeQuery(`I flipped a coin. It's ${side}! 🪙`, { type: 'COIN_FLIP', result: side });
+      }
+      if (/\b(dice|die|roll)\b/i.test(raw)) {
+        const num = Math.floor(Math.random() * 6) + 1;
+        return makeQuery(`You rolled a ${num}! 🎲`, { type: 'DICE_ROLL', result: num });
+      }
+      if (/\b(siri|better\s+than\s+siri)\b/i.test(raw)) {
+        return makeQuery("Siri is legendary, but can she track your Punjabi expenses and parse Indian clock times offline? OmniVoice is proud of its roots! 🚀", { type: 'EASTER_EGG' });
+      }
+      if (/\b(who\s+(made|created|built)|creator)\b/i.test(raw)) {
+        return makeQuery("I was built by Balkirat Singh as an enterprise multilingual voice assistant for the hackathon! 🏆", { type: 'EASTER_EGG' });
+      }
+      const jokes = [
+        "Why don't programmers like nature? It has too many bugs! 🐛",
+        "Why did the voice assistant cross the road? To get better reception! 📶",
+        "There are 10 types of people in the world: those who understand binary, and those who don't. 💻"
+      ];
+      const joke = jokes[Math.floor(Math.random() * jokes.length)];
+      return makeQuery(joke, { type: 'JOKE' });
     }
 
     // ── DAILY SUMMARY (CP5) ──
@@ -539,6 +601,52 @@ Return VALID JSON ONLY:
       .trim();
     if (!note || note.length < 2) note = category || 'Expense';
     return note.charAt(0).toUpperCase() + note.slice(1);
+  }
+
+  evaluateMath(text) {
+    const lower = text.toLowerCase();
+    // Percent: "X percent of Y" or "X% of Y"
+    const mPct = lower.match(/(\d+(?:\.\d+)?)\s*(?:percent|%)\s*(?:of)?\s*(\d+(?:\.\d+)?)/);
+    if (mPct) {
+      const p = parseFloat(mPct[1]);
+      const total = parseFloat(mPct[2]);
+      const ans = Math.round(((p / 100) * total) * 100) / 100;
+      return { expr: `${p}% of ${total}`, ans, spoken: `${p} percent of ${total} is ${ans}.` };
+    }
+    // Divide: "X divided by Y"
+    const mDiv = lower.match(/(\d+(?:\.\d+)?)\s*(?:divided\s+by|\/)\s*(\d+(?:\.\d+)?)/);
+    if (mDiv) {
+      const a = parseFloat(mDiv[1]);
+      const b = parseFloat(mDiv[2]);
+      if (b === 0) return { expr: `${a} / 0`, ans: 'Undefined', spoken: "Cannot divide by zero." };
+      const ans = Math.round((a / b) * 100) / 100;
+      return { expr: `${a} / ${b}`, ans, spoken: `${a} divided by ${b} is ${ans}.` };
+    }
+    // Multiply: "X times Y" or "X multiplied by Y"
+    const mMul = lower.match(/(\d+(?:\.\d+)?)\s*(?:multiplied\s+by|times|\*|x)\s*(\d+(?:\.\d+)?)/);
+    if (mMul) {
+      const a = parseFloat(mMul[1]);
+      const b = parseFloat(mMul[2]);
+      const ans = Math.round(a * b * 100) / 100;
+      return { expr: `${a} × ${b}`, ans, spoken: `${a} times ${b} is ${ans}.` };
+    }
+    // Plus: "X plus Y"
+    const mPlus = lower.match(/(\d+(?:\.\d+)?)\s*(?:plus|\+)\s*(\d+(?:\.\d+)?)/);
+    if (mPlus) {
+      const a = parseFloat(mPlus[1]);
+      const b = parseFloat(mPlus[2]);
+      const ans = Math.round((a + b) * 100) / 100;
+      return { expr: `${a} + ${b}`, ans, spoken: `${a} plus ${b} is ${ans}.` };
+    }
+    // Minus: "X minus Y"
+    const mMinus = lower.match(/(\d+(?:\.\d+)?)\s*(?:minus|-)\s*(\d+(?:\.\d+)?)/);
+    if (mMinus) {
+      const a = parseFloat(mMinus[1]);
+      const b = parseFloat(mMinus[2]);
+      const ans = Math.round((a - b) * 100) / 100;
+      return { expr: `${a} - ${b}`, ans, spoken: `${a} minus ${b} is ${ans}.` };
+    }
+    return null;
   }
 
   // ─── COMPOUND COMMAND DETECTOR ────────────────────────────────────────────

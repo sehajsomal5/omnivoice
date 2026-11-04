@@ -272,6 +272,38 @@ const TRAINING_DATA = {
     'kamm mita', 'reminder hata',
   ],
 
+  QUERY_TIME: [
+    'what time is it', 'what is the time', 'tell me the time',
+    'current time', 'what time', 'check time', 'what is time',
+    'samay kya hai', 'time batao', 'time ki hoya', 'time please',
+  ],
+
+  QUERY_DATE: [
+    'what is today date', 'what is the date', 'todays date', 'today date',
+    'what day is today', 'which day is today', 'tell me the date',
+    'aaj ki date kya hai', 'aaj konsa din hai', 'aaj di date',
+  ],
+
+  CALCULATOR: [
+    'calculate', 'how much is', 'what is percent of',
+    'what is divided by', 'what is multiplied by', 'what is plus',
+    'what is minus', 'math', 'calculate 15 plus 20',
+  ],
+
+  QUERY_WEATHER: [
+    'what is the weather', 'how is the weather', 'weather today',
+    'is it raining', 'temperature today', 'weather forecast',
+    'aaj mausam kaisa hai', 'mausam batao', 'weather update',
+  ],
+
+  EASTER_EGG: [
+    'flip a coin', 'toss a coin', 'heads or tails',
+    'roll a dice', 'roll dice', 'throw dice',
+    'tell me a joke', 'tell a joke', 'make me laugh',
+    'who made you', 'who created you', 'who built you',
+    'are you better than siri', 'do you know siri',
+  ],
+
   GREETING: [
     'hello', 'hi', 'hey', 'good morning', 'good evening', 'good afternoon',
     'who are you', 'what can you do', 'help', 'test', 'testing',
@@ -295,6 +327,11 @@ const INTENT_ANCHORS = {
   QUERY_EXPENSES_MONTH: ['monthly expense','monthly spending','month total','mahine ka kharcha'],
   QUERY_REMINDERS:      ['reminder','reminders','alarm','alarms'],
   QUERY_TASKS:          ['pending','task','tasks','kaam','kamm','todo'],
+  QUERY_TIME:           ['time','samay','ghadi','clock'],
+  QUERY_DATE:           ['date','taareekh','din'],
+  CALCULATOR:           ['calculate','divided','multiplied','percent','minus'],
+  QUERY_WEATHER:        ['weather','mausam','temperature','forecast'],
+  EASTER_EGG:           ['coin','toss','dice','joke','siri'],
   GREETING:             ['hello','hi','hey','help'],
 };
 
