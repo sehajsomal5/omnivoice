@@ -258,6 +258,13 @@ const TRAINING_DATA = {
     'kamm mukk gaya',
   ],
 
+  DELETE_EXPENSE: [
+    'delete expense', 'remove expense', 'delete wrong expense',
+    'remove last expense', 'delete last expense', 'cancel expense',
+    'delete expense 250', 'remove lunch expense', 'undo expense',
+    'wrong expense delete karo', 'kharcha delete karo',
+  ],
+
   DELETE_TASK: [
     // English
     'delete task', 'remove task',
@@ -285,9 +292,10 @@ const TRAINING_DATA = {
   ],
 
   CALCULATOR: [
-    'calculate', 'how much is', 'what is percent of',
+    'calculate', 'how much is', 'what is percent of', 'percent of',
     'what is divided by', 'what is multiplied by', 'what is plus',
-    'what is minus', 'math', 'calculate 15 plus 20',
+    'what is minus', 'math', 'calculate 15 plus 20', 'what is 10% of 10',
+    'what is 10 percent of 10', '10 percent of 10', '10% of 10', 'percent',
   ],
 
   QUERY_WEATHER: [
@@ -320,6 +328,7 @@ const INTENT_ANCHORS = {
   DAILY_SUMMARY:        ['summary','briefing','brief','overview'],
   COMPLETE_TASK:        ['complete','finish','done','mark','khatam','mukk'],
   DELETE_TASK:          ['delete','remove','cancel','erase','hatao','mita'],
+  DELETE_EXPENSE:       ['expense','kharcha','undo','wrong'],
   QUERY_BALANCE:        ['balance','budget','remaining','bacha','bachi','kinna'],
   QUERY_TOMORROW:       ['tomorrow','kal'],
   QUERY_COMPLETED_TASKS:['completed','done','finished','accomplished'],

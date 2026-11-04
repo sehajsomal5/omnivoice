@@ -214,6 +214,12 @@ Return VALID JSON ONLY:
     const compoundResult = this.tryCompound(raw, lang, today);
     if (compoundResult) return compoundResult;
 
+    // ── STEP 2.5: DIRECT MATH DETECTOR (Prevents math like "10% of 10" from becoming an expense) ──
+    const directMath = this.evaluateMath(raw);
+    if (directMath && !/\b(spent|paid|bought|kharcha|kharch|rupees?|rupaye|rs\.?)\b/i.test(raw)) {
+      return makeQuery(directMath.spoken, { type: 'CALCULATOR', expression: directMath.expr, result: directMath.ans });
+    }
+
     // ── STEP 3: CLASSIFY INTENT ───────────────────────────────────────────
     const { intent } = this.classifier.classify(raw);
 
@@ -398,12 +404,33 @@ Return VALID JSON ONLY:
       }
     }
 
-    // ── ACTION: DELETE ──
+    // ── ACTION: DELETE TASK ──
     if (intent === 'DELETE_TASK') {
       const title = this.extractTitle(raw, 'DELETE_TASK');
       if (title) {
         return makeAction(`Deleted "${title}".`, { type: 'DELETE_TASK', title });
       }
+    }
+
+    // ── ACTION: DELETE EXPENSE ──
+    if (intent === 'DELETE_EXPENSE' || (/\b(delete|remove|cancel|undo)\s+(the\s+)?(last\s+)?(wrong\s+)?expense\b/i.test(raw))) {
+      const amount = this.extractAmount(raw);
+      let target = null;
+      if (amount) {
+        target = expenses.find(e => Number(e.amount) === Number(amount));
+      } else {
+        const itemNote = raw.replace(/\b(delete|remove|cancel|undo|wrong|expense|the|last|my)\b/gi, '').trim().toLowerCase();
+        if (itemNote.length > 2) {
+          target = expenses.find(e => (e.note && e.note.toLowerCase().includes(itemNote)) || (e.category && e.category.toLowerCase().includes(itemNote)));
+        }
+        if (!target && expenses.length > 0) {
+          target = expenses[0]; // most recent
+        }
+      }
+      if (target) {
+        return makeAction(`Deleted expense: ₹${target.amount} for ${target.note}.`, { type: 'DELETE_EXPENSE', id: target.id, amount: target.amount, note: target.note });
+      }
+      return makeQuery("No matching expense found to delete.", { type: 'DELETE_EXPENSE' });
     }
 
     // ── ACTION: ADD REMINDER ──
@@ -441,17 +468,33 @@ Return VALID JSON ONLY:
 
     // ── ACTION: LOG EXPENSE ──
     if (intent === 'LOG_EXPENSE') {
+      const hasExpenseWord = /\b(spent|paid|bought|expense|log|track|record|rupees?|rupaye|rs\.?|inr|kharcha|kharch|laga|lagga|gaye)\b/i.test(raw);
+      if (!hasExpenseWord && !amount) {
+        return makeQuery("If you'd like to log an expense, try: 'Spent 250 on lunch' or 'Log ₹500 for groceries'.", { type: 'QUERY_EXPENSES_TODAY' });
+      }
       if (!amount) {
         // Ask for amount — multi-turn slot filling
         const item = this.extractNote(raw, null, null);
         return makeClarify(`How much did you spend on ${item || 'that'}?`,
           { active: true, intent: 'AWAITING_EXPENSE_AMOUNT', partialData: { note: item || 'Expense', category } });
       }
+
+      // Detect date: yesterday vs today vs custom date
+      let expDate = today;
+      if (/\byesterday\b|\bkal\s+(bita|gaya|pehle)\b/i.test(raw) || (/\bkal\b/i.test(raw) && /\b(spent|paid|bought|kharch|diya)\b/i.test(raw))) {
+        const yDate = new Date(Date.now() - 86400000);
+        expDate = yDate.toISOString().split('T')[0];
+      } else if (date && date !== 'Today' && date !== 'Tomorrow') {
+        expDate = date;
+      }
+
       const note = this.extractNote(raw, amount, category);
+      const isYesterday = expDate === new Date(Date.now() - 86400000).toISOString().split('T')[0];
+      const dateSuffix = isYesterday ? ' for yesterday' : (expDate !== today ? ` for ${expDate}` : '');
       const spoken = lang.includes('Hindi')
-        ? `हो गया! ₹${amount} ${note} के लिए ${category} में सेव।`
-        : `Saved ₹${amount} for ${note} under ${category}.`;
-      return makeAction(spoken, { type: 'EXPENSE', amount, category, note, date: today });
+        ? `हो गया! ₹${amount} ${note} के लिए ${category} में सेव${dateSuffix}।`
+        : `Saved ₹${amount} for ${note} under ${category}${dateSuffix}.`;
+      return makeAction(spoken, { type: 'EXPENSE', amount, category, note, date: expDate });
     }
 
     // ── ACTION: ADD TASK ──
@@ -540,14 +583,19 @@ Return VALID JSON ONLY:
       }
     }
 
-    // Date: "tomorrow", "monday", etc.
-    const dateMatch = text.match(/\b(tomorrow|today|monday|tuesday|wednesday|thursday|friday|saturday|sunday|kal|parso)\b/i);
+    // Date: "tomorrow", "today", "yesterday", days of week, or custom dates (e.g. "Nov 5", "5th Nov")
     let date = null;
-    if (dateMatch) {
-      const d = dateMatch[1].toLowerCase();
-      if (d === 'kal') date = 'Tomorrow';
-      else if (d === 'parso') date = 'Day after tomorrow';
-      else date = d.charAt(0).toUpperCase() + d.slice(1);
+    const specificDateMatch = text.match(/\b(?:on\s+)?(?:the\s+)?(?:(\d{1,2}(?:st|nd|rd|th)?\s+(?:of\s+)?(?:jan(?:uary)?|feb(?:ruary)?|mar(?:ch)?|apr(?:il)?|may|jun(?:e)?|jul(?:y)?|aug(?:ust)?|sep(?:tember)?|oct(?:ober)?|nov(?:ember)?|dec(?:ember)?))|(?:(?:jan(?:uary)?|feb(?:ruary)?|mar(?:ch)?|apr(?:il)?|may|jun(?:e)?|jul(?:y)?|aug(?:ust)?|sep(?:tember)?|oct(?:ober)?|nov(?:ember)?|dec(?:ember)?)\s+(\d{1,2}(?:st|nd|rd|th)?)))\b/i);
+    if (specificDateMatch) {
+      date = specificDateMatch[0].replace(/^(?:on\s+|the\s+)/i, '').trim();
+    } else {
+      const dateMatch = text.match(/\b(tomorrow|today|yesterday|monday|tuesday|wednesday|thursday|friday|saturday|sunday|kal|parso)\b/i);
+      if (dateMatch) {
+        const d = dateMatch[1].toLowerCase();
+        if (d === 'kal') date = 'Tomorrow';
+        else if (d === 'parso') date = 'Day after tomorrow';
+        else date = d.charAt(0).toUpperCase() + d.slice(1);
+      }
     }
     return { time, date };
   }
@@ -596,7 +644,8 @@ Return VALID JSON ONLY:
     // 3. Strip time/date/trailing prepositions
     t = t
       .replace(/\b(at\s+)?\d{1,4}(?:[:.\s]\d{2})?\s*(?:a\.?m\.?|p\.?m\.?|baje|vaje|o'?clock)(?:\.|\b)?/gi, '')
-      .replace(/\b(on\s+)?(tomorrow|today|monday|tuesday|wednesday|thursday|friday|saturday|sunday|kal|parso)\b/gi, '')
+      .replace(/\b(?:on\s+)?(?:the\s+)?(?:(\d{1,2}(?:st|nd|rd|th)?\s+(?:of\s+)?(?:jan(?:uary)?|feb(?:ruary)?|mar(?:ch)?|apr(?:il)?|may|jun(?:e)?|jul(?:y)?|aug(?:ust)?|sep(?:tember)?|oct(?:ober)?|nov(?:ember)?|dec(?:ember)?))|(?:(?:jan(?:uary)?|feb(?:ruary)?|mar(?:ch)?|apr(?:il)?|may|jun(?:e)?|jul(?:y)?|aug(?:ust)?|sep(?:tember)?|oct(?:ober)?|nov(?:ember)?|dec(?:ember)?)\s+(\d{1,2}(?:st|nd|rd|th)?)))\b/gi, '')
+      .replace(/\b(on\s+)?(tomorrow|today|yesterday|monday|tuesday|wednesday|thursday|friday|saturday|sunday|kal|parso)\b/gi, '')
       .replace(/\b(please|on|at|for|by|before|after|urgently|urgent|important|asap)\b/gi, '')
       .replace(/^[.\s,:-]+|[.\s,:-]+$/g, '')
       .replace(/\s+/g, ' ')
@@ -622,7 +671,7 @@ Return VALID JSON ONLY:
       .replace(/\b(i\s+)?(spent|paid|bought|add\s+expense|log\s+expense|expense|track)\s*/gi, '')
       .replace(/\b(rs\.?|₹|inr|rupees?|rupaye)\s*/gi, '')
       .replace(/\d+(?:\.\d{1,2})?\s*/g, '')
-      .replace(/\b(on|for|ka|ke|de|at|in|the)\b/gi, '')
+      .replace(/\b(on|for|ka|ke|de|at|in|the|yesterday|today|kal|aaj)\b/gi, '')
       .replace(/\s+/g, ' ')
       .trim()
       .replace(/^(and|or)\s+/i, '')

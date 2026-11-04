@@ -1250,6 +1250,15 @@
             } else if (action.type === 'DELETE_TASK') {
               tasks = tasks.filter(t => !t.title.toLowerCase().includes(action.title.toLowerCase()));
               reminders = reminders.filter(r => !r.title.toLowerCase().includes(action.title.toLowerCase()));
+            } else if (action.type === 'DELETE_EXPENSE') {
+              if (action.id) {
+                expenses = expenses.filter(e => e.id !== action.id);
+              } else if (action.amount) {
+                const idx = expenses.findIndex(e => Number(e.amount) === Number(action.amount));
+                if (idx !== -1) expenses.splice(idx, 1);
+              } else if (expenses.length > 0) {
+                expenses.shift();
+              }
             } else if (action.type === 'COMPLETE_TASK') {
               const t = tasks.find(item => item.title.toLowerCase().includes(action.title.toLowerCase()));
               if (t) t.completed = true;
