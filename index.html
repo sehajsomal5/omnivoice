@@ -1114,6 +1114,13 @@
         // Multi-Turn Slot Clarification
         if (result.isClarification) {
           conversationContext = result.followUpContext;
+          clearTimeout(window._contextExpiryTimer);
+          window._contextExpiryTimer = setTimeout(() => {
+            clearTimeout(window._contextExpiryTimer);
+        conversationContext = null;
+            if (speech.isListening && !wakeWordActive) speech.stopListening();
+            setAgentState('IDLE');
+          }, 25000);
           setAgentState('WAITING_CONFIRMATION', 'Awaiting your answer...');
 
           transcriptText.innerHTML = `
@@ -1140,6 +1147,7 @@
           return;
         }
 
+        clearTimeout(window._contextExpiryTimer);
         conversationContext = null;
 
         // Daily Summary Briefing

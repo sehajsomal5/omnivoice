@@ -130,54 +130,82 @@ Return VALID JSON ONLY:
     const makeAction = (spoken, ...acts)     => ({ detectedLanguage: lang, isQuery: false, isClarification: false, isSummary: false, followUpContext: null, spokenResponse: spoken, actions: acts });
     const makeClarify= (spoken, ctx)         => ({ detectedLanguage: lang, isQuery: false, isClarification: true,  isSummary: false, followUpContext: ctx,  spokenResponse: spoken, actions: [] });
 
+    // 0. Cancellation keywords
+    if (/^(cancel|never\s*mind|stop|forget\s*it|chhoro|hatao)$/i.test(raw.trim())) {
+      return makeAction("Cancelled.", { type: 'CANCEL' });
+    }
+
     // ── STEP 1: MULTI-TURN CONTEXT RESOLUTION ─────────────────────────────
     if (context?.active) {
-      if (context.intent === 'AWAITING_REMINDER_TIME') {
-        const { time: parsedTime, date: parsedDate } = this.extractTimeDate(raw);
-        if (!parsedTime) {
-          // If no time was detected in the reply, ask specifically for time instead of inventing one!
-          const title = context.partialData.title || 'Reminder';
-          return makeClarify(
-            `At what time would you like the reminder for "${title}"? (e.g. 5 PM or 10:30 AM)`,
-            context
-          );
-        }
-        const title = context.partialData.title || 'Reminder';
-        const d = parsedDate || context.partialData.date || 'Today';
-        const t = parsedTime;
-        return makeAction(
-          lang.includes('Hindi') ? `हो गया! "${title}" का रिमाइंडर ${d} को ${t} के लिए सेट।` : `Done! Reminder "${title}" set for ${d} at ${t}.`,
-          { type: 'REMINDER', title, date: d, time: t, timestamp: Date.now() }
-        );
-      }
-      if (context.intent === 'AWAITING_REMINDER_DETAILS') {
-        const { time: parsedTime, date: parsedDate } = this.extractTimeDate(raw);
-        let title = this.extractTitle(raw, 'ADD_REMINDER') || raw.replace(/\b(at\s+)?\d{1,2}(?:[:.\s]\d{2})?\s*(?:am|pm|baje|vaje|o'?clock)?\b/gi, '').trim();
-        title = title.replace(/\b(tomorrow|today|monday|tuesday|wednesday|thursday|friday|saturday|sunday)\b/gi, '').trim();
-        const cleanTitle = (title || 'Reminder').charAt(0).toUpperCase() + (title || 'Reminder').slice(1);
-        const d = parsedDate || context.partialData?.date || 'Today';
-        const t = parsedTime || context.partialData?.time;
+      // Check if user switched topics with a distinct command instead of replying
+      const { intent: candidateIntent, confidence: candidateConfidence } = this.classifier.classify(raw);
+      const isSwitchingCommand = (
+        (candidateIntent === 'ADD_TASK' && !context.intent.includes('TASK')) ||
+        (candidateIntent === 'ADD_REMINDER' && context.intent !== 'AWAITING_REMINDER_TIME' && context.intent !== 'AWAITING_REMINDER_DETAILS') ||
+        (candidateIntent === 'LOG_EXPENSE' && !context.intent.includes('EXPENSE')) ||
+        (candidateIntent === 'DAILY_SUMMARY') ||
+        (candidateIntent === 'QUERY_TIME') ||
+        (candidateIntent === 'QUERY_WEATHER') ||
+        (candidateIntent === 'QUERY_TASKS') ||
+        (candidateIntent === 'QUERY_EXPENSES_TODAY') ||
+        (candidateIntent === 'EASTER_EGG')
+      ) && candidateConfidence >= 0.35;
 
-        if (!t) {
-          return makeClarify(
-            `At what time would you like the reminder for "${cleanTitle}"?`,
-            { active: true, intent: 'AWAITING_REMINDER_TIME', partialData: { title: cleanTitle, date: d } }
+      if (!isSwitchingCommand) {
+        if (context.intent === 'AWAITING_REMINDER_TIME') {
+          const { time: parsedTime, date: parsedDate } = this.extractTimeDate(raw);
+          if (!parsedTime) {
+            // Check if input clearly looks like another command
+            if (candidateConfidence >= 0.35 && candidateIntent !== 'GREETING') {
+              // Preempt stale context and fall through to process command
+            } else {
+              const rawTitle = context.partialData?.title;
+              const title = (rawTitle && rawTitle.toLowerCase() !== 'add a' && rawTitle.length > 2) ? rawTitle : 'Reminder';
+              return makeClarify(
+                `At what time would you like the reminder for "${title}"? (e.g. 5 PM or 10:30 AM)`,
+                context
+              );
+            }
+          } else {
+            const rawTitle = context.partialData?.title;
+            const title = (rawTitle && rawTitle.toLowerCase() !== 'add a' && rawTitle.length > 2) ? rawTitle : 'Reminder';
+            const d = parsedDate || context.partialData?.date || 'Today';
+            const t = parsedTime;
+            return makeAction(
+              lang.includes('Hindi') ? `हो गया! "${title}" का रिमाइंडर ${d} को ${t} के लिए सेट।` : `Done! Reminder "${title}" set for ${d} at ${t}.`,
+              { type: 'REMINDER', title, date: d, time: t, timestamp: Date.now() }
+            );
+          }
+        }
+        if (context.intent === 'AWAITING_REMINDER_DETAILS') {
+          const { time: parsedTime, date: parsedDate } = this.extractTimeDate(raw);
+          let title = this.extractTitle(raw, 'ADD_REMINDER') || raw.replace(/\b(at\s+)?\d{1,2}(?:[:.\s]\d{2})?\s*(?:am|pm|baje|vaje|o'?clock)?\b/gi, '').trim();
+          title = title.replace(/\b(tomorrow|today|monday|tuesday|wednesday|thursday|friday|saturday|sunday)\b/gi, '').trim();
+          const cleanTitle = (title || 'Reminder').charAt(0).toUpperCase() + (title || 'Reminder').slice(1);
+          const d = parsedDate || context.partialData?.date || 'Today';
+          const t = parsedTime || context.partialData?.time;
+
+          if (!t) {
+            return makeClarify(
+              `At what time would you like the reminder for "${cleanTitle}"?`,
+              { active: true, intent: 'AWAITING_REMINDER_TIME', partialData: { title: cleanTitle, date: d } }
+            );
+          }
+          return makeAction(
+            lang.includes('Hindi') ? `हो गया! "${cleanTitle}" का रिमाइंडर ${d} को ${t} के लिए सेट।` : `Reminder set: "${cleanTitle}" for ${d} at ${t}.`,
+            { type: 'REMINDER', title: cleanTitle, date: d, time: t, timestamp: Date.now() }
           );
         }
-        return makeAction(
-          lang.includes('Hindi') ? `हो गया! "${cleanTitle}" का रिमाइंडर ${d} को ${t} के लिए सेट।` : `Reminder set: "${cleanTitle}" for ${d} at ${t}.`,
-          { type: 'REMINDER', title: cleanTitle, date: d, time: t, timestamp: Date.now() }
-        );
-      }
-      if (context.intent === 'AWAITING_TASK_TITLE') {
-        const title = raw.charAt(0).toUpperCase() + raw.slice(1);
-        return makeAction(`Done! Task added: "${title}".`, { type: 'TASK', title, dueDate: 'Today', priority: 'Normal' });
-      }
-      if (context.intent === 'AWAITING_EXPENSE_AMOUNT') {
-        const amount = this.extractAmount(raw);
-        if (amount) {
-          const { note, category } = context.partialData;
-          return makeAction(`Saved ₹${amount} for ${note} under ${category}.`, { type: 'EXPENSE', amount, category, note, date: today });
+        if (context.intent === 'AWAITING_TASK_TITLE') {
+          const title = raw.charAt(0).toUpperCase() + raw.slice(1);
+          return makeAction(`Done! Task added: "${title}".`, { type: 'TASK', title, dueDate: 'Today', priority: 'Normal' });
+        }
+        if (context.intent === 'AWAITING_EXPENSE_AMOUNT') {
+          const amount = this.extractAmount(raw);
+          if (amount) {
+            const { note, category } = context.partialData;
+            return makeAction(`Saved ₹${amount} for ${note} under ${category}.`, { type: 'EXPENSE', amount, category, note, date: today });
+          }
         }
       }
     }
