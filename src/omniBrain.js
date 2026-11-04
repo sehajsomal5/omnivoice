@@ -407,27 +407,40 @@ Return VALID JSON ONLY:
   extractTimeDate(text) {
     let time = null;
 
-    // Pattern 1: HH:MM, HH.MM, or HH MM with optional AM/PM (e.g. '12 38 pm', '12:38 pm', '12.38 pm', '4:30', '11 15 am')
-    const m1 = text.match(/\b(\d{1,2})[:.\s](\d{2})\s*(am|pm|baje|vaje)?\b/i);
+    // Pattern 1: HH:MM, HH.MM, or HH MM with optional AM/PM (e.g. '12 38 pm', '12:38 pm', '12.38 pm', '4:30', '11 15 am', '11:28 a.m.')
+    const m1 = text.match(/\b(\d{1,2})[:.\s](\d{2})\s*(a\.?m\.?|p\.?m\.?|baje|vaje)?\b/i);
     if (m1) {
       const h = parseInt(m1[1]);
       const min = m1[2];
-      let mer = (m1[3] || '').toUpperCase();
-      if (h >= 1 && h <= 23 && parseInt(min) >= 0 && parseInt(min) <= 59) {
+      let mer = (m1[3] || '').replace(/\./g, '').toUpperCase();
+      if (h >= 0 && h <= 23 && parseInt(min) >= 0 && parseInt(min) <= 59) {
         if (!mer || (mer !== 'AM' && mer !== 'PM')) {
-          mer = h >= 7 && h <= 11 ? 'AM' : 'PM';
+          mer = h >= 12 ? 'PM' : (h >= 7 && h <= 11 ? 'AM' : 'PM');
         }
         const displayH = h > 12 ? h - 12 : (h === 0 ? 12 : h);
         time = `${displayH}:${min} ${mer}`;
       }
     }
 
-    // Pattern 2: Single hour with AM/PM, baje/vaje, or o'clock (e.g. '5 pm', '12 pm', '7 am', '5 baje', '5 o clock')
+    // Pattern 2: Concatenated 3-4 digits like '1128 am' or '1128 a.m.' or '930 pm'
     if (!time) {
-      const m2 = text.match(/\b(\d{1,2})\s*(?:o'?clock\s*)?(am|pm|baje|vaje|o'?clock)?\b/i);
+      const mConcatenated = text.match(/\b(\d{1,2})(\d{2})\s*(a\.?m\.?|p\.?m\.?)\b/i);
+      if (mConcatenated) {
+        const h = parseInt(mConcatenated[1]);
+        const min = mConcatenated[2];
+        const mer = mConcatenated[3].replace(/\./g, '').toUpperCase();
+        if (h >= 1 && h <= 12 && parseInt(min) >= 0 && parseInt(min) <= 59) {
+          time = `${h}:${min} ${mer}`;
+        }
+      }
+    }
+
+    // Pattern 3: Single hour with AM/PM, baje/vaje, or o'clock (e.g. '5 pm', '12 pm', '7 am', '5 baje', '5 o clock', '6 a.m.')
+    if (!time) {
+      const m2 = text.match(/\b(\d{1,2})\s*(?:o'?clock\s*)?(a\.?m\.?|p\.?m\.?|baje|vaje|o'?clock)?\b/i);
       if (m2) {
         const h = parseInt(m2[1]);
-        let mer = (m2[2] || '').toUpperCase();
+        let mer = (m2[2] || '').replace(/\./g, '').toUpperCase();
         if (h >= 1 && h <= 12) {
           if (!mer || mer === 'BAJE' || mer === 'VAJE' || mer.includes('CLOCK')) {
             mer = h >= 7 && h <= 11 ? 'AM' : 'PM';
@@ -492,9 +505,10 @@ Return VALID JSON ONLY:
 
     // 3. Strip time/date/trailing prepositions
     t = t
-      .replace(/\b(at\s+)?\d{1,2}(?:[:.\s]\d{2})?\s*(?:am|pm|baje|vaje|o'?clock)?\b/gi, '')
+      .replace(/\b(at\s+)?\d{1,4}(?:[:.\s]\d{2})?\s*(?:a\.?m\.?|p\.?m\.?|baje|vaje|o'?clock)(?:\.|\b)?/gi, '')
       .replace(/\b(on\s+)?(tomorrow|today|monday|tuesday|wednesday|thursday|friday|saturday|sunday|kal|parso)\b/gi, '')
       .replace(/\b(please|on|at|for|by|before|after|urgently|urgent|important|asap)\b/gi, '')
+      .replace(/^[.\s,:-]+|[.\s,:-]+$/g, '')
       .replace(/\s+/g, ' ')
       .trim()
       .replace(/^(to|that|for|and|a|an)\s+/i, '')

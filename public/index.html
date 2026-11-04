@@ -800,7 +800,11 @@
         </div>
       </div>
 
-      <div class="flex justify-end pt-5 mt-4 border-t border-white/[0.08]">
+      <div class="flex flex-col gap-2 pt-4 mt-4 border-t border-white/[0.08]">
+        <button id="resetDemoDataBtn" class="btn-ghost flex items-center justify-center gap-2 py-2.5 text-xs text-amber-300 border-amber-500/30 hover:bg-amber-500/10">
+          <i data-lucide="refresh-cw" class="w-3.5 h-3.5"></i>
+          <span>Reset to Clean Demo Data</span>
+        </button>
         <button id="dismissProfileBtn" class="btn-primary w-full py-2.5">Close Profile</button>
       </div>
     </div>
@@ -836,21 +840,37 @@
     </div>
   </div>
 
-  <!-- ===== IN-APP REMINDER DUE MODAL ===== -->
+  <!-- ===== IN-APP REMINDER DUE MODAL (ALARM WITH SNOOZE & COMPLETION) ===== -->
   <div id="dueReminderModal" class="modal-backdrop hidden">
     <div class="modal-box border-amber-500/40 text-center space-y-4">
-      <div class="w-14 h-14 rounded-2xl bg-amber-500/15 text-amber-400 border border-amber-500/30 flex items-center justify-center mx-auto">
-        <i data-lucide="bell" class="w-7 h-7 animate-bounce"></i>
+      <div class="relative w-16 h-16 mx-auto flex items-center justify-center">
+        <div class="absolute inset-0 rounded-2xl bg-amber-500/20 animate-ping"></div>
+        <div class="relative w-14 h-14 rounded-2xl bg-amber-500/20 text-amber-400 border border-amber-500/40 flex items-center justify-center shadow-lg shadow-amber-500/20">
+          <i data-lucide="bell-ring" class="w-7 h-7 animate-bounce"></i>
+        </div>
       </div>
       <div>
-        <span class="bg-amber-500 text-slate-950 text-[10px] font-black px-2.5 py-0.5 rounded-full uppercase tracking-wider">
-          REMINDER DUE NOW
+        <span class="bg-amber-500 text-slate-950 text-[10px] font-black px-3 py-1 rounded-full uppercase tracking-wider shadow-sm">
+          ⏰ REMINDER ALARM DUE NOW
         </span>
-        <h3 id="dueModalTitle" class="text-lg font-bold text-white mt-2">Submit Hackathon Form</h3>
-        <p id="dueModalTime" class="text-xs text-slate-400 mt-0.5">Scheduled for Today • 5:00 PM</p>
+        <h3 id="dueModalTitle" class="text-xl font-black text-white mt-3">Call Father</h3>
+        <p id="dueModalTime" class="text-xs text-amber-300/90 font-mono mt-1">Scheduled for Today • 5:00 PM</p>
       </div>
-      <button id="dismissDueModalBtn" class="btn-primary w-full py-2.5 bg-gradient-to-r from-amber-500 to-amber-600 text-slate-950 font-black">
-        Acknowledge &amp; Dismiss
+
+      <!-- Action Buttons: Snooze, Complete, Dismiss -->
+      <div class="grid grid-cols-2 gap-2.5 pt-2">
+        <button id="snoozeDueModalBtn" class="btn-ghost flex items-center justify-center gap-1.5 py-2.5 text-xs text-amber-300 border-amber-500/40 hover:bg-amber-500/10">
+          <i data-lucide="clock" class="w-4 h-4"></i>
+          <span>Snooze (+10m)</span>
+        </button>
+        <button id="completeDueModalBtn" class="btn-primary flex items-center justify-center gap-1.5 py-2.5 text-xs bg-gradient-to-r from-emerald-500 to-teal-600 text-white font-bold">
+          <i data-lucide="check" class="w-4 h-4"></i>
+          <span>Mark Completed</span>
+        </button>
+      </div>
+
+      <button id="dismissDueModalBtn" class="text-xs text-slate-400 hover:text-white transition w-full py-1">
+        Dismiss Alarm
       </button>
     </div>
   </div>
@@ -880,18 +900,40 @@
     let audioFeedback = true;
     let conversationContext = null;
 
+    // Helper: Clean Realistic Demo Data
+    function getCleanDemoData() {
+      const today = new Date().toISOString().split('T')[0];
+      return {
+        tasks: [
+          { id: 't1', title: 'Prepare OmniVoice pitch presentation', dueDate: 'Today', priority: 'High', completed: false },
+          { id: 't2', title: 'Test multilingual speech recognition on mobile', dueDate: 'Today', priority: 'Normal', completed: false },
+          { id: 't3', title: 'Review AI intent classification benchmarks', dueDate: 'Tomorrow', priority: 'Normal', completed: false }
+        ],
+        reminders: [
+          { id: 'r1', title: 'Call father', date: 'Today', time: '5:00 PM', notified: false },
+          { id: 'r2', title: 'Hackathon project submission deadline', date: 'Today', time: '6:30 PM', notified: false }
+        ],
+        expenses: [
+          { id: 'e1', amount: 250, category: 'Food', note: 'Lunch at Cafe', date: today },
+          { id: 'e2', amount: 180, category: 'Travel', note: 'Metro travel card', date: today },
+          { id: 'e3', amount: 430, category: 'Food', note: 'Team coffee & snacks', date: today }
+        ],
+        budget: 5000
+      };
+    }
+
+    // Auto-Sanitizer: purge dirty test remnants from previous command runs
+    const dirtyPatterns = [/add a new task/i, /help me add a reminder/i, /^\d{3,4}\s*(a\.?m\.?|p\.?m\.?)$/i, /\b38:00\b/i, /add task/i, /set a reminder/i];
+    tasks = tasks.filter(t => !dirtyPatterns.some(p => p.test(t.title)));
+    reminders = reminders.filter(r => !dirtyPatterns.some(p => p.test(r.title)) && !dirtyPatterns.some(p => p.test(r.time || '')));
+
     // Seed defaults if empty
     if (tasks.length === 0 && expenses.length === 0 && reminders.length === 0) {
-      tasks = [
-        { id: 't1', title: 'Submit pitch presentation & code repository', dueDate: 'Today', priority: 'High', completed: false },
-        { id: 't2', title: 'Review voice commands across English & Hindi', dueDate: 'Tomorrow', priority: 'Normal', completed: false }
-      ];
-      reminders = [
-        { id: 'r1', title: 'Product demonstration check-in', date: 'Today', time: '4:30 PM', notified: false }
-      ];
-      expenses = [
-        { id: 'e1', amount: 250, category: 'Food', note: 'Lunch at Cafe', date: new Date().toISOString().split('T')[0] }
-      ];
+      const demo = getCleanDemoData();
+      tasks = demo.tasks;
+      reminders = demo.reminders;
+      expenses = demo.expenses;
+      budget = demo.budget;
       saveAll();
     }
 
@@ -931,40 +973,78 @@
     const dueReminderModal = document.getElementById('dueReminderModal');
     const dueModalTitle = document.getElementById('dueModalTitle');
     const dueModalTime = document.getElementById('dueModalTime');
+    const snoozeDueModalBtn = document.getElementById('snoozeDueModalBtn');
+    const completeDueModalBtn = document.getElementById('completeDueModalBtn');
     const dismissDueModalBtn = document.getElementById('dismissDueModalBtn');
     const waveBars = document.getElementById('waveBars');
     const userProfileBtn = document.getElementById('userProfileBtn');
     const userProfileModal = document.getElementById('userProfileModal');
     const closeProfileBtn = document.getElementById('closeProfileBtn');
     const dismissProfileBtn = document.getElementById('dismissProfileBtn');
+    const resetDemoDataBtn = document.getElementById('resetDemoDataBtn');
 
-    // Shim for background speech reference
-    const orbWave = { classList: { remove: () => {}, add: () => {} } };
+    // Visual States: LISTENING, PROCESSING, EXECUTING, SPEAKING, WAITING_CONFIRMATION, IDLE
+    function setAgentState(state, customStatus) {
+      orbContainer.className = 'orb-container';
+      waveBars.classList.remove('active', 'speaking');
+
+      if (state === 'LISTENING') {
+        agentStateBadge.className = 'text-[10px] sm:text-[11px] px-2.5 py-1 rounded-full bg-purple-500/20 text-purple-300 font-mono border border-purple-500/40 flex items-center gap-1.5 animate-pulse';
+        agentStateBadge.innerHTML = `<span class="w-1.5 h-1.5 rounded-full bg-purple-400 animate-ping"></span> STATE: LISTENING`;
+        micLabel.textContent = "LISTENING...";
+        orbContainer.classList.add('orb-listening');
+        waveBars.classList.add('active');
+        voiceStatus.textContent = customStatus || "Listening to your voice... Speak naturally";
+      } else if (state === 'PROCESSING') {
+        agentStateBadge.className = 'text-[10px] sm:text-[11px] px-2.5 py-1 rounded-full bg-amber-500/20 text-amber-300 font-mono border border-amber-500/40 flex items-center gap-1.5 animate-pulse';
+        agentStateBadge.innerHTML = `<span class="w-1.5 h-1.5 rounded-full bg-amber-400 animate-ping"></span> STATE: PROCESSING`;
+        micLabel.textContent = "THINKING...";
+        orbContainer.classList.add('orb-listening');
+        waveBars.classList.add('active');
+        voiceStatus.textContent = customStatus || "Extracting intent, parameters & semantics...";
+      } else if (state === 'EXECUTING') {
+        agentStateBadge.className = 'text-[10px] sm:text-[11px] px-2.5 py-1 rounded-full bg-emerald-500/20 text-emerald-300 font-mono border border-emerald-500/40 flex items-center gap-1.5 animate-pulse';
+        agentStateBadge.innerHTML = `<span class="w-1.5 h-1.5 rounded-full bg-emerald-400"></span> STATE: EXECUTING`;
+        micLabel.textContent = "EXECUTING...";
+        orbContainer.classList.add('orb-idle');
+        voiceStatus.textContent = customStatus || "Updating local ledger & dashboard state...";
+      } else if (state === 'SPEAKING') {
+        agentStateBadge.className = 'text-[10px] sm:text-[11px] px-2.5 py-1 rounded-full bg-sky-500/20 text-sky-300 font-mono border border-sky-500/40 flex items-center gap-1.5';
+        agentStateBadge.innerHTML = `<span class="w-1.5 h-1.5 rounded-full bg-sky-400 animate-pulse"></span> STATE: SPEAKING`;
+        micLabel.textContent = "SPEAKING...";
+        orbContainer.classList.add('orb-speaking');
+        waveBars.classList.add('active', 'speaking');
+        voiceStatus.textContent = customStatus || "Speaking AI voice response...";
+      } else if (state === 'WAITING_CONFIRMATION') {
+        agentStateBadge.className = 'text-[10px] sm:text-[11px] px-2.5 py-1 rounded-full bg-pink-500/20 text-pink-300 font-mono border border-pink-500/40 flex items-center gap-1.5 animate-pulse';
+        agentStateBadge.innerHTML = `<span class="w-1.5 h-1.5 rounded-full bg-pink-400 animate-ping"></span> STATE: AWAITING INPUT`;
+        micLabel.textContent = "YOUR TURN...";
+        orbContainer.classList.add('orb-listening');
+        waveBars.classList.add('active');
+        voiceStatus.textContent = customStatus || "Awaiting follow-up details from you...";
+      } else {
+        agentStateBadge.className = 'text-[10px] sm:text-[11px] px-2.5 py-1 rounded-full bg-white/[0.05] text-slate-300 font-mono border border-white/[0.08]';
+        agentStateBadge.textContent = "STATE: IDLE";
+        micLabel.textContent = "TAP TO TALK";
+        orbContainer.classList.add('orb-idle');
+        voiceStatus.textContent = customStatus || "Ready for voice input in English, Hindi, or Punjabi";
+      }
+    }
 
     // Initialize Services
     const brain = new OmniBrain();
     const speech = new SpeechController({
       lang: langSelect.value,
       onStateChange: (state) => {
-        agentStateBadge.textContent = `STATE: ${state}`;
-        orbContainer.className = 'orb-container';
-        waveBars.classList.remove('active', 'speaking');
-
         if (state === 'LISTENING') {
-          micLabel.textContent = "LISTENING...";
-          orbContainer.classList.add('orb-listening');
-          waveBars.classList.add('active');
-          voiceStatus.textContent = "Listening to your voice...";
+          setAgentState('LISTENING');
           sounds.playMicStart();
         } else if (state === 'SPEAKING') {
-          micLabel.textContent = "SPEAKING...";
-          orbContainer.classList.add('orb-speaking');
-          waveBars.classList.add('active', 'speaking');
-          voiceStatus.textContent = "Speaking AI response...";
+          setAgentState('SPEAKING');
         } else {
-          micLabel.textContent = "TAP TO TALK";
-          orbContainer.classList.add('orb-idle');
-          voiceStatus.textContent = "Ready for input in English, Hindi, or Punjabi";
+          if (!conversationContext) {
+            setAgentState('IDLE');
+          }
         }
       },
       onTranscript: ({ final, interim }) => {
@@ -976,13 +1056,14 @@
       },
       onError: (err) => {
         voiceStatus.textContent = `Status: ${err}. Try manual input or buttons above.`;
+        setAgentState('IDLE');
       }
     });
 
     // Execute Voice or Text Command
     async function executeCommand(input) {
       if (!input || input.trim().length < 2) return;
-      voiceStatus.textContent = "Processing natural language...";
+      setAgentState('PROCESSING', `Analyzing: "${input}"`);
 
       try {
         const result = await brain.processInput(input, { tasks, reminders, expenses, budget }, conversationContext);
@@ -991,19 +1072,25 @@
         // Multi-Turn Slot Clarification
         if (result.isClarification) {
           conversationContext = result.followUpContext;
+          setAgentState('WAITING_CONFIRMATION', 'Awaiting your answer...');
+
           transcriptText.innerHTML = `
             <div class="space-y-2">
               <span class="text-[10px] text-slate-400 block font-mono">YOU SAID: "${input}"</span>
-              <div class="p-3 rounded-xl bg-amber-500/15 border border-amber-500/40 text-xs font-bold text-amber-200 flex items-center justify-between">
-                <span>💬 ${result.spokenResponse}</span>
-                <span class="text-[10px] bg-amber-400 text-slate-950 font-black px-2 py-0.5 rounded-full animate-pulse shrink-0 ml-2">SPEAK NOW</span>
+              <div class="p-3 rounded-2xl bg-amber-500/15 border border-amber-500/40 text-xs font-bold text-amber-200 flex items-center justify-between shadow-lg">
+                <span class="flex items-center gap-2"><i data-lucide="help-circle" class="w-4 h-4 text-amber-400"></i> ${result.spokenResponse}</span>
+                <span class="text-[10px] bg-amber-400 text-slate-950 font-black px-2.5 py-0.5 rounded-full animate-pulse shrink-0 ml-2">SPEAK NOW</span>
               </div>
             </div>
           `;
+          lucide.createIcons();
           sounds.playSuccess();
 
           if (audioFeedback && result.spokenResponse) {
-            speech.onSpeakingEnd = () => speech.startListening();
+            speech.onSpeakingEnd = () => {
+              setAgentState('WAITING_CONFIRMATION');
+              speech.startListening();
+            };
             speech.speak(result.spokenResponse, result.detectedLanguage);
           } else {
             speech.startListening();
@@ -1025,19 +1112,61 @@
             <div class="space-y-1.5">
               <span class="text-[10px] text-slate-400 block font-mono">YOU ASKED:</span>
               <p class="text-xs sm:text-sm font-semibold text-slate-200">"${input}"</p>
-              <div class="p-2.5 rounded-xl bg-purple-950/40 border border-purple-500/30 text-xs font-bold text-purple-300">
+              <div class="p-3 rounded-2xl bg-purple-950/40 border border-purple-500/30 text-xs font-bold text-purple-200">
                 💬 ${result.spokenResponse}
               </div>
             </div>
           `;
           sounds.playSuccess();
+          setAgentState('IDLE');
         } else {
+          setAgentState('EXECUTING', 'Writing action to persistent storage...');
+
+          // Format Detailed Action Confirmation Card
+          let actionHeader = "Action Confirmed & Executed";
+          let actionMain = result.spokenResponse;
+          let actionSub = "Saved to local ledger • Synced with OmniVoice Hub";
+          let actionBadge = "SUCCESS";
+
+          const primaryAction = (result.actions || [])[0];
+          if (primaryAction) {
+            if (primaryAction.type === 'REMINDER') {
+              actionHeader = "Reminder Successfully Scheduled";
+              actionMain = `"${primaryAction.title}"`;
+              actionSub = `⏰ ${primaryAction.date} at ${primaryAction.time} • In-App Alarm Active`;
+              actionBadge = "REMINDER SET";
+            } else if (primaryAction.type === 'TASK') {
+              actionHeader = "Task Added to Backlog";
+              actionMain = `"${primaryAction.title}"`;
+              actionSub = `📅 Due: ${primaryAction.dueDate || 'Today'} • Priority: ${primaryAction.priority || 'Normal'}`;
+              actionBadge = "TASK SAVED";
+            } else if (primaryAction.type === 'EXPENSE') {
+              actionHeader = "Expense Recorded in Ledger";
+              actionMain = `₹${primaryAction.amount} on ${primaryAction.note || primaryAction.category}`;
+              actionSub = `💳 Category: ${primaryAction.category} • Date: ${primaryAction.date || 'Today'}`;
+              actionBadge = "EXPENSE LOGGED";
+            }
+          }
+
           transcriptText.innerHTML = `
-            <div class="space-y-1.5">
-              <span class="text-[10px] text-slate-400 block font-mono">YOU SAID:</span>
-              <p class="text-xs sm:text-sm font-semibold text-slate-200">"${input}"</p>
-              <div class="p-2.5 rounded-xl bg-emerald-950/40 border border-emerald-500/30 text-xs font-bold text-emerald-300">
-                ✅ ${result.spokenResponse}
+            <div class="space-y-2">
+              <span class="text-[10px] text-slate-400 block font-mono">YOU SAID: "${input}"</span>
+              <div class="p-3.5 rounded-2xl bg-gradient-to-r from-emerald-950/70 via-slate-900/80 to-purple-950/40 border border-emerald-500/40 shadow-xl space-y-2">
+                <div class="flex items-center justify-between">
+                  <div class="flex items-center gap-2">
+                    <span class="w-6 h-6 rounded-lg bg-emerald-500/20 text-emerald-400 flex items-center justify-center text-xs font-black">✓</span>
+                    <span class="text-xs font-extrabold text-emerald-300 uppercase tracking-wide font-mono">${actionHeader}</span>
+                  </div>
+                  <span class="text-[9px] font-black px-2.5 py-0.5 rounded-full bg-emerald-500/20 text-emerald-300 border border-emerald-500/30">
+                    ${actionBadge}
+                  </span>
+                </div>
+                <div class="pl-8 text-xs text-slate-200">
+                  <p class="font-extrabold text-sm text-white">${actionMain}</p>
+                  <p class="text-[11px] text-slate-400 mt-0.5 flex items-center gap-2 font-mono">
+                    <span>${actionSub}</span>
+                  </p>
+                </div>
               </div>
             </div>
           `;
@@ -1082,16 +1211,20 @@
           saveAll();
           renderDashboard();
           sounds.playSuccess();
-          showToast("Action Saved", result.spokenResponse);
+          showToast(actionHeader, result.spokenResponse);
         }
 
         if (audioFeedback && result.spokenResponse) {
+          setAgentState('SPEAKING');
+          speech.onSpeakingEnd = () => setAgentState('IDLE');
           speech.speak(result.spokenResponse, result.detectedLanguage);
+        } else {
+          setAgentState('IDLE');
         }
 
       } catch (err) {
         console.error("Execution error:", err);
-        voiceStatus.textContent = "Processing error. Please retry.";
+        setAgentState('IDLE', "Processing error. Please retry.");
       }
     }
 
@@ -1213,24 +1346,115 @@
       lucide.createIcons();
     }
 
-    // Modal & Alert Triggers
-    function triggerDueAlert(title, time) {
+    // Modal & Alarm Alert Triggers
+    let currentDueReminder = null;
+    let alarmSoundInterval = null;
+
+    function triggerDueAlert(title, time, reminderObj = null) {
+      currentDueReminder = reminderObj || { title, time, date: 'Today' };
       dueModalTitle.textContent = title;
       dueModalTime.textContent = time;
       dueReminderModal.classList.remove('hidden');
+      lucide.createIcons();
+
       sounds.playEmergencyAlert();
+      clearInterval(alarmSoundInterval);
+      alarmSoundInterval = setInterval(() => {
+        if (!dueReminderModal.classList.contains('hidden')) {
+          sounds.playEmergencyAlert();
+        } else {
+          clearInterval(alarmSoundInterval);
+        }
+      }, 4500);
+
       if (audioFeedback) speech.speak(`Reminder alert: ${title}`);
     }
 
-    dismissDueModalBtn.addEventListener('click', () => dueReminderModal.classList.add('hidden'));
+    function stopAlarm() {
+      clearInterval(alarmSoundInterval);
+      dueReminderModal.classList.add('hidden');
+    }
+
+    dismissDueModalBtn.addEventListener('click', stopAlarm);
+
+    if (snoozeDueModalBtn) {
+      snoozeDueModalBtn.addEventListener('click', () => {
+        stopAlarm();
+        if (currentDueReminder) {
+          const now = new Date(Date.now() + 10 * 60000);
+          let hours = now.getHours();
+          const minutes = String(now.getMinutes()).padStart(2, '0');
+          const mer = hours >= 12 ? 'PM' : 'AM';
+          hours = hours % 12 || 12;
+          const snoozedTime = `${hours}:${minutes} ${mer}`;
+          currentDueReminder.time = snoozedTime;
+          currentDueReminder.notified = false;
+          saveAll();
+          renderDashboard();
+          showToast("Reminder Snoozed", `"${currentDueReminder.title}" snoozed until ${snoozedTime} (+10m)`);
+        }
+      });
+    }
+
+    if (completeDueModalBtn) {
+      completeDueModalBtn.addEventListener('click', () => {
+        stopAlarm();
+        if (currentDueReminder) {
+          reminders = reminders.filter(r => r !== currentDueReminder && r.id !== currentDueReminder.id && r.title !== currentDueReminder.title);
+          saveAll();
+          renderDashboard();
+          sounds.playSuccess();
+          confetti({ particleCount: 40, spread: 60, origin: { y: 0.7 } });
+          showToast("Reminder Completed", `"${currentDueReminder.title}" marked as completed.`);
+        }
+      });
+    }
+
     testDueNotificationBtn.addEventListener('click', () => triggerDueAlert("Project Demo Review", "Scheduled for Today • 5:00 PM"));
     document.getElementById('navAlertBtn').addEventListener('click', () => {
       if (reminders.length > 0) {
-        triggerDueAlert(reminders[0].title, `${reminders[0].date} • ${reminders[0].time}`);
+        triggerDueAlert(reminders[0].title, `${reminders[0].date} • ${reminders[0].time}`, reminders[0]);
       } else {
         showToast("Reminders", "No active alerts pending.");
       }
     });
+
+    if (resetDemoDataBtn) {
+      resetDemoDataBtn.addEventListener('click', () => {
+        userProfileModal.classList.add('hidden');
+        window.resetDemoData();
+      });
+    }
+
+    window.resetDemoData = () => {
+      const demo = getCleanDemoData();
+      tasks = demo.tasks;
+      reminders = demo.reminders;
+      expenses = demo.expenses;
+      budget = demo.budget;
+      saveAll();
+      renderDashboard();
+      showToast("Demo Data Loaded", "Reset to clean, realistic tasks, reminders & expenses.");
+      confetti({ particleCount: 30, spread: 60, origin: { y: 0.7 } });
+    };
+
+    // Live background alarm checker every 10 seconds
+    setInterval(() => {
+      const now = new Date();
+      let hours = now.getHours();
+      const minutes = String(now.getMinutes()).padStart(2, '0');
+      const mer = hours >= 12 ? 'PM' : 'AM';
+      hours = hours % 12 || 12;
+      const curTime = `${hours}:${minutes} ${mer}`;
+
+      reminders.forEach(r => {
+        if (!r.notified && (!r.date || r.date.toLowerCase() === 'today') && r.time === curTime) {
+          r.notified = true;
+          saveAll();
+          triggerDueAlert(r.title, `${r.date || 'Today'} • ${r.time}`, r);
+        }
+      });
+    }, 10000);
 
     // Profile Modal
     userProfileBtn.addEventListener('click', () => userProfileModal.classList.remove('hidden'));
